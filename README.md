@@ -1,4 +1,8 @@
-# BIM Family AI — Etapa 2
+# BIM Family AI — Etapa 3A
+
+Se añade **BIM Family AI — Generar familia paramétrica** a Herramientas externas, junto al generador fijo original. Crea `BIMFamilyAI_ParametricBox.rfa` con una sola extrusión, parámetros de tipo **Ancho, Profundidad, Altura y Material**, y tipos **Cubo_500** y **Prisma_1000x600x750**. Cambie estos valores desde **Crear → Propiedades → Tipos de familia**, aplique y observe la geometría sin ejecutar de nuevo el complemento.
+
+Los parámetros auxiliares BFAI_Semiancho y BFAI_Semiprofundidad son fórmulas para conservar el centrado. El material está asociado a la extrusión. Consulte el [informe y pruebas de etapa 3A](docs/stage3a-validation.md) para el mecanismo, resultados reales y comprobaciones pendientes.
 
 Comando externo para crear una familia Modelo genérico con extrusión sólida nativa de 500 × 500 × 500 mm, centrada en X/Y y apoyada en Z=0. Core permanece independiente de Autodesk.
 
@@ -59,8 +63,8 @@ El comando verifica la caja de la extrusión antes de confirmar la transacción.
 - Plantilla inválida: seleccione la estándar sin anfitrión de Revit 2027.
 - Guardado fallido: revise permisos de Documentos y el detalle mostrado en el diálogo.
 
-## Etapa 3
+## Etapa 3B
 
-Pendiente de definir e implementar después de validar esta entrega. IA, OBJ, WPF completo y parámetros editables quedan pendientes. Para claves futuras usar variables de entorno o configuración local excluida de Git; nunca guardar secretos en código.
+Pendiente de definir e implementar después de validar esta entrega. IA, OBJ y WPF completo quedan pendientes. Para claves futuras usar variables de entorno o configuración local excluida de Git; nunca guardar secretos en código.
 
 Referencias oficiales: https://help.autodesk.com/cloudhelp/2027/ENU/Revit-API/files/Revit_API_Developers_Guide/Introduction/Getting_Started/Using_the_Autodesk_Revit_API/Revit_API_Revit_API_Developers_Guide_Introduction_Getting_Started_Using_the_Autodesk_Revit_API_Registration_of_add_ins_html.html

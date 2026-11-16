@@ -10,6 +10,9 @@ namespace BimFamilyAI.Revit;
 public sealed class GenerateTestFamilyCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        => ExecuteFamily(commandData, ref message, false);
+
+    internal static Result ExecuteFamily(ExternalCommandData commandData, ref string message, bool parametric)
     {
         Document? family = null;
         string? staging = null;
@@ -29,46 +32,58 @@ public sealed class GenerateTestFamilyCommand : IExternalCommand
             if (!family.IsFamilyDocument || family.OwnerFamily.FamilyCategory.Id != new ElementId(BuiltInCategory.OST_GenericModel))
                 throw new InvalidOperationException("Seleccione una plantilla de Modelo genérico, sin anfitrión ni componentes adaptativos.");
 
-            double side = UnitUtils.ConvertToInternalUnits(500, UnitTypeId.Millimeters);
-            double half = side / 2;
-            using (var transaction = new Transaction(family, "Crear cubo de 500 mm"))
+            if (parametric) ParametricBoxBuilder.CreateAndValidate(family);
+            else
             {
-                if (transaction.Start() != TransactionStatus.Started)
-                    throw new InvalidOperationException("No se pudo iniciar la transacción.");
-                XYZ[] points = [new(-half, -half, 0), new(half, -half, 0), new(half, half, 0), new(-half, half, 0)];
-                var profile = new CurveArray();
-                for (int i = 0; i < points.Length; i++)
-                    profile.Append(Line.CreateBound(points[i], points[(i + 1) % points.Length]));
-                var profiles = new CurveArrArray();
-                profiles.Append(profile);
-                using var plane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, XYZ.Zero);
-                var sketch = SketchPlane.Create(family, plane);
-                var cube = family.FamilyCreate.NewExtrusion(true, profiles, sketch, side);
-                family.Regenerate();
-                var box = cube.get_BoundingBox(null);
-                if (box is null || (box.Min - new XYZ(-half, -half, 0)).GetLength() > 1e-6 ||
-                    (box.Max - new XYZ(half, half, side)).GetLength() > 1e-6)
-                    throw new InvalidOperationException("La extrusión no tiene las dimensiones o posición esperadas.");
-                if (transaction.Commit() != TransactionStatus.Committed)
-                    throw new InvalidOperationException("Revit no confirmó la transacción. No se guardó la familia.");
-            }
+                double side = UnitUtils.ConvertToInternalUnits(500, UnitTypeId.Millimeters);
+                double half = side / 2;
+                using (var transaction = new Transaction(family, "Crear cubo de 500 mm"))
+                {
+                    if (transaction.Start() != TransactionStatus.Started)
+                        throw new InvalidOperationException("No se pudo iniciar la transacción.");
+                    XYZ[] points = [new(-half, -half, 0), new(half, -half, 0), new(half, half, 0), new(-half, half, 0)];
+                    var profile = new CurveArray();
+                    for (int i = 0; i < points.Length; i++)
+                        profile.Append(Line.CreateBound(points[i], points[(i + 1) % points.Length]));
+                    var profiles = new CurveArrArray();
+                    profiles.Append(profile);
+                    using var plane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, XYZ.Zero);
+                    var sketch = SketchPlane.Create(family, plane);
+                    var cube = family.FamilyCreate.NewExtrusion(true, profiles, sketch, side);
+                    family.Regenerate();
+                    var box = cube.get_BoundingBox(null);
+                    if (box is null || (box.Min - new XYZ(-half, -half, 0)).GetLength() > 1e-6 ||
+                        (box.Max - new XYZ(half, half, side)).GetLength() > 1e-6)
+                        throw new InvalidOperationException("La extrusión no tiene las dimensiones o posición esperadas.");
+                    if (transaction.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit no confirmó la transacción. No se guardó la familia.");
+                }
 
+            }
+            string baseName = parametric ? "BIMFamilyAI_ParametricBox" : "BIMFamilyAI_TestCube_500mm";
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             if (string.IsNullOrWhiteSpace(documents)) throw new IOException("Windows no devolvió una carpeta Documentos válida.");
             var directory = Path.Combine(documents, "BIM Family AI", "Generated");
             Directory.CreateDirectory(directory);
             staging = Path.Combine(directory, ".staging-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(staging);
-            var temporary = Path.Combine(staging, "BIMFamilyAI_TestCube_500mm.rfa");
+            var temporary = Path.Combine(staging, baseName + ".rfa");
             using var options = new SaveAsOptions { OverwriteExistingFile = false, MaximumBackups = 1 };
             family.SaveAs(temporary, options);
             if (!File.Exists(temporary)) throw new IOException("Revit no creó el archivo RFA.");
             if (!family.Close(false)) throw new IOException("No se pudo cerrar el documento de familia.");
             family = null;
+            if (parametric)
+            {
+                family = app.OpenDocumentFile(temporary);
+                ParametricBoxBuilder.ValidateSaved(family);
+                if (!family.Close(false)) throw new IOException("No se pudo cerrar la familia reabierta.");
+                family = null;
+            }
             for (int index = 0; ; index++)
             {
                 var suffix = index == 0 ? "" : "_" + index;
-                var candidate = Path.Combine(directory, "BIMFamilyAI_TestCube_500mm" + suffix + ".rfa");
+                var candidate = Path.Combine(directory, baseName + suffix + ".rfa");
                 try { File.Move(temporary, candidate, false); output = candidate; break; }
                 catch (IOException) when (File.Exists(candidate)) { }
             }
@@ -93,7 +108,7 @@ public sealed class GenerateTestFamilyCommand : IExternalCommand
         }
         message = string.Join(Environment.NewLine, errors);
         TaskDialog.Show("BIM Family AI", output is not null
-            ? "Familia creada: " + output + "\nCubo nativo de 500 × 500 × 500 mm.\n" + message
+            ? "Familia creada: " + output + (parametric ? "\nFamilia paramétrica: dos tipos y material asociados. Validaciones geométricas superadas.\n" : "\nCubo nativo de 500 × 500 × 500 mm.\n") + message
             : "No se pudo generar la familia.\n" + message);
         return result;
     }

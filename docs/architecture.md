@@ -1,5 +1,9 @@
 # Arquitectura mínima
 
+## Etapa 3A
+
+GenerateParametricFamilyCommand delega el ciclo de documento/plantilla/guardado al flujo existente de GenerateTestFamilyCommand, conservando el generador fijo. ParametricBoxBuilder concentra las restricciones y validación de una única extrusión: planos, cotas de semidimensiones con fórmulas, altura y material asociados. No añade dependencias ni lógica Autodesk a Core. El archivo temporal se reabre y se valida antes de entregar el RFA final. Ver stage3a-validation.md para resultados y pendientes.
+
 ## Límites actuales
 
 - **BimFamilyAI.Core**: modelos de entrada/salida, validaciones y contratos puros de C#. Sin Autodesk, red ni dependencias de proveedores.

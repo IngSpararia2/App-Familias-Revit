@@ -33,13 +33,24 @@ $assembly = [System.Security.SecurityElement]::Escape((Join-Path $deployment 'Bi
     <Assembly>$assembly</Assembly>
     <AddInId>2FC87746-282E-446B-8EC1-7E9A969EB97E</AddInId>
     <FullClassName>BimFamilyAI.Revit.GenerateTestFamilyCommand</FullClassName>
-    <Text>BIM Family AI</Text>
+    <Text>BIM Family AI — Generar familia de prueba</Text>
     <VendorId>BFAI</VendorId>
     <VendorDescription>BIM Family AI</VendorDescription>
     <Description>Generar familia de prueba: cubo nativo de 500 mm.</Description>
   </AddIn>
+  <AddIn Type="Command">
+    <Assembly>$assembly</Assembly>
+    <AddInId>A6E63248-4A84-4A47-9163-6F56478AB8C2</AddInId>
+    <FullClassName>BimFamilyAI.Revit.GenerateParametricFamilyCommand</FullClassName>
+    <Text>BIM Family AI — Generar familia paramétrica</Text>
+    <VendorId>BFAI</VendorId>
+    <VendorDescription>BIM Family AI</VendorDescription>
+    <Description>Prisma con dimensiones y material de tipo editables.</Description>
+  </AddIn>
 </RevitAddIns>
 "@
 $manifest.Save($manifestPath)
-if (!(Test-Path -LiteralPath $manifest.RevitAddIns.AddIn.Assembly)) { throw 'El ensamblado registrado no existe.' }
+foreach ($entry in $manifest.RevitAddIns.AddIn) {
+    if (!(Test-Path -LiteralPath $entry.Assembly)) { throw 'El ensamblado registrado no existe.' }
+}
 Write-Output "Complemento instalado: $manifestPath"
