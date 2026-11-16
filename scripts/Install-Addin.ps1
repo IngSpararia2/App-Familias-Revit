@@ -7,7 +7,7 @@ if (Get-Process Revit -ErrorAction SilentlyContinue) { throw 'Cierre Revit antes
 if ($Uninstall) {
     if (Test-Path -LiteralPath $manifestPath) { Remove-Item -LiteralPath $manifestPath }
     # Remove only known application files; never recursively remove a shared directory.
-    foreach ($name in @('BimFamilyAI.Revit.dll', 'BimFamilyAI.Core.dll', 'BimFamilyAI.Revit.deps.json')) {
+    foreach ($name in @('BimFamilyAI.Revit.dll', 'BimFamilyAI.Core.dll', 'BimFamilyAI.Meshy.dll', 'BimFamilyAI.Revit.deps.json')) {
         $file = Join-Path $deployment $name
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
     }
@@ -23,7 +23,7 @@ try {
 } finally { Pop-Location }
 $source = Join-Path $root "src\BimFamilyAI.Revit\bin\x64\$Configuration\net10.0-windows"
 New-Item -ItemType Directory -Path $deployment, $registration -Force | Out-Null
-foreach ($name in @('BimFamilyAI.Revit.dll', 'BimFamilyAI.Core.dll', 'BimFamilyAI.Revit.deps.json')) {
+foreach ($name in @('BimFamilyAI.Revit.dll', 'BimFamilyAI.Core.dll', 'BimFamilyAI.Meshy.dll', 'BimFamilyAI.Revit.deps.json')) {
     Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path $deployment $name) -Force
 }
 $assembly = [System.Security.SecurityElement]::Escape((Join-Path $deployment 'BimFamilyAI.Revit.dll'))
@@ -55,6 +55,15 @@ $assembly = [System.Security.SecurityElement]::Escape((Join-Path $deployment 'Bi
     <VendorId>BFAI</VendorId>
     <VendorDescription>BIM Family AI</VendorDescription>
     <Description>Importación OBJ nativa con unidades, escala y posición verificadas.</Description>
+  </AddIn>
+  <AddIn Type="Command">
+    <Assembly>$assembly</Assembly>
+    <AddInId>D0A1F906-F8C2-4DDA-947A-F1E53FBB61C7</AddInId>
+    <FullClassName>BimFamilyAI.Revit.CreateFamilyFromPhotoCommand</FullClassName>
+    <Text>BIM Family AI — Crear familia desde fotografía</Text>
+    <VendorId>BFAI</VendorId>
+    <VendorDescription>BIM Family AI</VendorDescription>
+    <Description>Fotografía a OBJ y RFA; modo simulado inicial y autorización explícita para Meshy real.</Description>
   </AddIn>
 </RevitAddIns>
 "@

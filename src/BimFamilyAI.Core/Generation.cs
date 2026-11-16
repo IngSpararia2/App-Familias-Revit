@@ -17,3 +17,17 @@ public sealed record GeneratedObjResult(string Provider, string TaskId, string L
         return new(LocalPath, unit, verticalAxis, targetHeightMm, familyName, description);
     }
 }
+
+public static class PhotoFamilyRequest
+{
+    public static ObjImportRequest Create(GeneratedObjResult result, double heightMm, ObjVerticalAxis axis,
+        string name, string description, bool simulated)
+    {
+        if (!double.IsFinite(heightMm) || heightMm <= 0) throw new ArgumentException("Confirme una altura física real positiva en milímetros antes de crear el RFA.");
+        if (simulated && !name.StartsWith("SIM_", StringComparison.OrdinalIgnoreCase)) name = "SIM_" + name;
+        var label = simulated ? "SIMULACIÓN: OBJ de prueba, no generado por IA. " : "Geometría IA; dimensiones informativas. ";
+        // With a confirmed target height the arbitrary source-unit factor cancels in uniform scaling.
+        return result.ToImportRequest(ObjUnit.Millimeters, axis, heightMm, name, label + description)
+            with { SourceUnitsUnspecified = true };
+    }
+}

@@ -53,16 +53,31 @@ public sealed partial class MeshyClient : IDisposable
         "model_missing_texture" or "textured_split_refused" or "moderation_blocked" or "moderation_unavailable" or
         "queue_timeout" or "format_conversion_failed";
 
-    public async Task<MeshyTaskRecord> CreateAsync(ImageGenerationRequest request, MeshyOptions? options = null,
+    public Task<MeshyTaskRecord> CreateAsync(ImageGenerationRequest request, MeshyOptions? options = null,
         PaidGenerationApproval? approval = null, CancellationToken cancellationToken = default)
+        => CreateAttemptAsync(request, options ?? new(), approval, false, cancellationToken);
+
+    public Task<MeshyTaskRecord> RetryRejectedAsync(ImageGenerationRequest request, MeshyOptions options,
+        bool confirmedCorrection, PaidGenerationApproval? approval = null, CancellationToken cancellationToken = default)
     {
-        options ??= new(); options.Validate();
+        if (!confirmedCorrection) throw new MeshyException(MeshyError.InvalidInput, "Confirme que corrigió el motivo del rechazo antes de autorizar otro intento.");
+        return CreateAttemptAsync(request, options, approval, true, cancellationToken);
+    }
+
+    private async Task<MeshyTaskRecord> CreateAttemptAsync(ImageGenerationRequest request, MeshyOptions options,
+        PaidGenerationApproval? approval, bool retryRejected, CancellationToken cancellationToken)
+    {
+        options.Validate();
         var image = await LocalImage.ReadAsync(request.ImagePath, cancellationToken).ConfigureAwait(false);
         string fingerprint = options.Fingerprint(image.Sha256);
         // Credential and approval checks occur before reserving, but never before local validation.
         string? credential = null;
         var existing = (await store.ReadAsync(cancellationToken).ConfigureAwait(false)).SingleOrDefault(r => r.Fingerprint == fingerprint);
-        if (existing is not null) return Existing(existing);
+        if (!retryRejected && existing is not null) return Existing(existing);
+        if (retryRejected && (existing?.Submission != SubmissionState.Rejected || existing.TaskId is not null))
+            throw new MeshyException(MeshyError.InvalidInput, "Solo puede reintentarse un rechazo confirmado sin ID. Una creación incierta debe conciliarse.");
+        if(retryRejected && existing!.RetryNotBefore is { } next && next>DateTimeOffset.UtcNow)
+            throw new MeshyException(MeshyError.RateLimited,"Espere el Retry-After del proveedor antes de autorizar otro intento.",retryAfter:next-DateTimeOffset.UtcNow);
         if (Mode == MeshyMode.Real)
         {
             credential = Credential();
@@ -70,10 +85,19 @@ public sealed partial class MeshyClient : IDisposable
                 throw new MeshyException(MeshyError.RealModeDisabled, "La nueva generación pagada necesita confirmación explícita para esta imagen y configuración.");
         }
         var reservation = new MeshyTaskRecord { Fingerprint = fingerprint, ImageHash = image.Sha256, Options = options,
-            AttemptedAt = DateTimeOffset.UtcNow, Submission = SubmissionState.Uncertain };
+            AttemptedAt = DateTimeOffset.UtcNow, Submission = SubmissionState.Uncertain,
+            Audit = existing is null ? [] : [.. existing.Audit, new(DateTimeOffset.UtcNow, TaskAuditAction.RetriedConfirmedRejection, existing.LastError, null)] };
         bool reserved = await store.ChangeAsync(records =>
         {
-            if (records.Any(r => r.Fingerprint == fingerprint)) return false;
+            int index = records.FindIndex(r => r.Fingerprint == fingerprint);
+            if (index >= 0)
+            {
+                // Compare the actual rejected attempt under the cross-process lock, not just its fingerprint.
+                if (!retryRejected || records[index].Submission != SubmissionState.Rejected ||
+                    records[index].AttemptedAt != existing!.AttemptedAt || records[index].Audit.Length != existing.Audit.Length) return false;
+                records[index] = reservation; return true;
+            }
+            if (retryRejected) throw new MeshyException(MeshyError.Storage, "El intento rechazado ya no está en el diario.");
             records.Add(reservation); return true;
         }, token: cancellationToken).ConfigureAwait(false);
         if (!reserved) return Existing((await store.ReadAsync(cancellationToken).ConfigureAwait(false)).Single(r => r.Fingerprint == fingerprint));
@@ -102,8 +126,13 @@ public sealed partial class MeshyClient : IDisposable
             var error = Normalize(ex);
             if (knownId is not null) throw new MeshyException(MeshyError.Storage,
                 "Meshy aceptó la tarea, pero falló el guardado. Conserve el ID y recupérela sin volver a crear.", knownId);
-            var state = error.HttpStatus is >= 400 and < 500 ? SubmissionState.Rejected : SubmissionState.Uncertain;
-            await ReplaceAsync(reservation with { Submission = state, LastError = error.Code }, CancellationToken.None).ConfigureAwait(false);
+            // Only documented, definite request rejections qualify for an explicitly authorized retry.
+            // In particular, an HTTP 408/409 or an unknown status must not unlock another paid POST.
+            var state = error.HttpStatus is 400 or 401 or 402 or 403 or 404 or 422 or 429 ? SubmissionState.Rejected : SubmissionState.Uncertain;
+            var responseAt=DateTimeOffset.UtcNow;
+            DateTimeOffset? retryAt=error.RetryAfter is { } wait && wait>TimeSpan.Zero
+                ? responseAt.AddTicks(Math.Min(wait.Ticks,DateTimeOffset.MaxValue.Ticks-responseAt.Ticks)) : null;
+            await ReplaceAsync(reservation with { Submission = state, LastError = error.Code, RetryNotBefore=retryAt }, CancellationToken.None).ConfigureAwait(false);
             if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested) throw;
             throw error;
         }
@@ -123,7 +152,11 @@ public sealed partial class MeshyClient : IDisposable
         return value;
     }
     private void Authorize(HttpRequestMessage request, string? credential = null)
-        => request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Mode == MeshyMode.Simulated ? "simulation-only" : credential ?? Credential());
+    {
+        try {request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Mode == MeshyMode.Simulated ? "simulation-only" : credential ?? Credential());}
+        catch(Exception ex) when(ex is ArgumentException or FormatException)
+        {throw new MeshyException(MeshyError.InvalidCredential,"La credencial no tiene un formato válido para autenticación Bearer.");}
+    }
 
     public async Task<MeshyTaskRecord> RecoverAsync(string taskId, CancellationToken cancellationToken = default)
     {
@@ -250,6 +283,8 @@ public sealed partial class MeshyClient : IDisposable
             402 => (MeshyError.NoCredits, "Meshy informa créditos insuficientes."),
             403 => (MeshyError.Forbidden, "Meshy denegó el acceso."),
             404 => (MeshyError.NotFound, "La tarea no existe o ya no está disponible."),
+            408 => (MeshyError.NetworkTimeout, "El servidor no confirmó la creación antes del timeout. No repita el envío; concilie el intento."),
+            409 => (MeshyError.CreationUncertain, "El servidor informó un conflicto. Conserve el intento y compruebe si existe una tarea antes de generar de nuevo."),
             429 => (MeshyError.RateLimited, "Se alcanzó el límite de solicitudes de Meshy."),
             >= 500 => (MeshyError.ServerError, "Meshy informó un error de servidor."),
             _ => (MeshyError.BadRequest, "Respuesta HTTP inesperada de Meshy.")

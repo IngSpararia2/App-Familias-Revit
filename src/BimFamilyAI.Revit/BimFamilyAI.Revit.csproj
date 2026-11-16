@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\BimFamilyAI.Core\BimFamilyAI.Core.csproj" />
+    <ProjectReference Include="..\BimFamilyAI.Meshy\BimFamilyAI.Meshy.csproj" />
   </ItemGroup>
 </Project>

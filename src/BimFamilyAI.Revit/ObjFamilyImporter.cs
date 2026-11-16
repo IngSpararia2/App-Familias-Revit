@@ -74,7 +74,8 @@ internal static class ObjFamilyImporter
             fm.Set(p, value);
         }
         Text("Nombre del modelo", request.FamilyName); Text("Descripción", request.Description);
-        Text("Archivo de origen", System.IO.Path.GetFileName(request.Path)); Text("Unidades originales", request.Unit.ToString());
+        Text("Archivo de origen", System.IO.Path.GetFileName(request.Path));
+        Text("Unidades originales", request.SourceUnitsUnspecified ? "No declaradas; escala por altura confirmada" : request.Unit.ToString());
         var sizes = new[] { ("Ancho", expected.X), ("Profundidad", expected.Y), ("Altura", expected.Z) };
         foreach (var (name, size) in sizes)
         {

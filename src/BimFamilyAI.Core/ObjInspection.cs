@@ -5,7 +5,7 @@ namespace BimFamilyAI.Core;
 public enum ObjUnit { Millimeters, Centimeters, Meters, Inches, Feet }
 public enum ObjVerticalAxis { Z, Y, X }
 public sealed record ObjImportRequest(string Path, ObjUnit Unit, ObjVerticalAxis VerticalAxis,
-    double? TargetHeightMm, string FamilyName, string Description);
+    double? TargetHeightMm, string FamilyName, string Description, bool SourceUnitsUnspecified = false);
 public sealed record ObjBounds(double X, double Y, double Z);
 
 /// <summary>Bounded structural inspection only. Autodesk performs the actual OBJ import.</summary>

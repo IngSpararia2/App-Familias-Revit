@@ -5,6 +5,8 @@ namespace BimFamilyAI.Meshy;
 
 public enum SubmissionState { Uncertain, Known, Rejected }
 public enum DownloadState { None, Validated, Failed }
+public enum TaskAuditAction { RetriedConfirmedRejection, LinkedRecoveredId }
+public sealed record TaskAuditEntry(DateTimeOffset At, TaskAuditAction Action, MeshyError? PreviousError, string? RelatedTaskId);
 public sealed record MeshyTaskRecord
 {
     public required string Fingerprint { get; init; }
@@ -14,6 +16,7 @@ public sealed record MeshyTaskRecord
     public MeshyOptions? Options { get; init; }
     public DateTimeOffset? AttemptedAt { get; init; }
     public DateTimeOffset? CreatedAt { get; init; }
+    public DateTimeOffset? RetryNotBefore { get; init; }
     public SubmissionState Submission { get; init; }
     public ProcessingState? State { get; init; }
     public int? Progress { get; init; }
@@ -23,6 +26,7 @@ public sealed record MeshyTaskRecord
     public MeshyError? LastError { get; init; }
     // Only documented, allowlisted provider codes; never a raw response/message.
     public string? ProviderError { get; init; }
+    public TaskAuditEntry[] Audit { get; init; } = [];
 }
 
 /// <summary>One atomic journal, locked across processes. Corruption fails closed to protect reservations.</summary>
@@ -94,7 +98,10 @@ public sealed class JsonTaskStore
             r.ObjSha256 is { } objHash && !IsHash(objHash) ||
             r.ObjPath is { } obj && !IsOwnedObj(obj) ||
             r.Options is { } options && options.TargetPolycount is < 100 or > 15000 ||
-            r.ProviderError is { } code && !MeshyClient.IsProviderCode(code)) ||
+            r.ProviderError is { } code && !MeshyClient.IsProviderCode(code) ||
+            r.Audit is null || r.Audit.Length > 100 || r.Audit.Any(a => a is null || !Enum.IsDefined(a.Action) ||
+                a.PreviousError is { } previous && !Enum.IsDefined(previous) ||
+                a.RelatedTaskId is { } related && !MeshyClient.IsTaskId(related))) ||
             records.Select(r => r.Fingerprint).Distinct().Count() != records.Count ||
             records.Where(r => r.TaskId != null).Select(r => r.TaskId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != records.Count(r => r.TaskId != null))
             throw new JsonException();

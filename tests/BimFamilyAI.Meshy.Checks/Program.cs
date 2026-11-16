@@ -293,6 +293,12 @@ try
         Check(second.LocalPath!=first.LocalPath && await File.ReadAllTextAsync(first.LocalPath)=="tampered" &&
             ObjInspection.Inspect(second.LocalPath)==new ObjBounds(500,500,500) && s.Api.Posts==0,"invalid cache re-downloaded by ID without overwrite or generation");
     }
+    await Stage4bChecks.RunAsync(Check);
+    if(args.Contains("--write-preview"))
+    {
+        Directory.CreateDirectory("artifacts");
+        await File.WriteAllBytesAsync("artifacts/stage4b-photo.png",ImageFixture.Png(64,64));
+    }
     Check(Environment.GetEnvironmentVariable("MESHY_API_KEY")==null,"all simulations passed without MESHY_API_KEY");
     Console.WriteLine($"{passed} checks passed; HTTP transport: simulated handlers only; real generation POSTs: 0.");
 }

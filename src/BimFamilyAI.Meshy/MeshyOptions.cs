@@ -38,7 +38,7 @@ public enum MeshyError
     InvalidInput, MissingCredential, InvalidCredential, NoCredits, Forbidden, NotFound, BadRequest,
     RateLimited, ServerError, NetworkTimeout, NetworkFailure, InvalidJson, UnknownState,
     GenerationFailed, GenerationCanceled, MissingResult, UntrustedUrl, ExpiredUrl,
-    IncompleteDownload, DownloadTooLarge, InvalidObj, Storage, CreationUncertain, Duplicate, RealModeDisabled
+    IncompleteDownload, DownloadTooLarge, InvalidObj, Storage, CreationUncertain, Duplicate, RealModeDisabled, Busy
 }
 
 /// <summary>Messages are local constants, never raw HTTP bodies, URLs, tokens or image data.</summary>

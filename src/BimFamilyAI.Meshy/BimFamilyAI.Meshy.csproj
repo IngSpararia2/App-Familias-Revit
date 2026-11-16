@@ -2,4 +2,5 @@
   <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
   <ItemGroup><ProjectReference Include="../BimFamilyAI.Core/BimFamilyAI.Core.csproj" /></ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="BimFamilyAI.Meshy.Checks" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../../tests/fixtures/cube_500mm.obj" LogicalName="BimFamilyAI.Meshy.SimulationCube.obj" /></ItemGroup>
 </Project>

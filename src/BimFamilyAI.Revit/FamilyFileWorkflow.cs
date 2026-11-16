@@ -10,6 +10,19 @@ internal static class FamilyFileWorkflow
 {
     internal static Result ExecuteFamily(ExternalCommandData commandData, ref string message, bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null)
     {
+        var outcome = CreateFamily(commandData.Application.Application, parametric, obj);
+        message = outcome.Message;
+        if (outcome.Status == Result.Cancelled) return Result.Cancelled;
+        TaskDialog.Show("BIM Family AI", outcome.OutputPath is not null
+            ? "Familia creada: " + outcome.OutputPath + (obj is not null ? "\nOBJ importado y verificado después de reabrir. Dimensiones informativas; no controlan la malla.\n" : parametric ? "\nFamilia paramétrica: dos tipos y material asociados. Validaciones geométricas superadas.\n" : "\nCubo nativo de 500 × 500 × 500 mm.\n") + message
+            : "No se pudo generar la familia.\n" + message);
+        return outcome.Status;
+    }
+
+    // Must be called exclusively from a valid Revit command or ExternalEvent.Execute context.
+    internal static FamilyWorkflowOutcome CreateFamily(Autodesk.Revit.ApplicationServices.Application app,
+        bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null)
+    {
         Document? family = null;
         string? staging = null;
         string? output = null;
@@ -17,9 +30,8 @@ internal static class FamilyFileWorkflow
         var result = Result.Failed;
         try
         {
-            var app = commandData.Application.Application;
             var template = SelectTemplate(app.FamilyTemplatePath);
-            if (template is null) return Result.Cancelled;
+            if (template is null) return new(Result.Cancelled, null, "Selección de plantilla cancelada.");
             if (!File.Exists(template) || !string.Equals(Path.GetExtension(template), ".rft", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("La plantilla RFT no existe. Instale las plantillas de Revit 2027 o seleccione otra.");
 
@@ -104,11 +116,7 @@ internal static class FamilyFileWorkflow
                 catch (Exception ex) { errors.Add("No se pudo limpiar " + staging + ": " + ex.Message); }
             }
         }
-        message = string.Join(Environment.NewLine, errors);
-        TaskDialog.Show("BIM Family AI", output is not null
-            ? "Familia creada: " + output + (obj is not null ? "\nOBJ importado y verificado después de reabrir. Dimensiones informativas; no controlan la malla.\n" : parametric ? "\nFamilia paramétrica: dos tipos y material asociados. Validaciones geométricas superadas.\n" : "\nCubo nativo de 500 × 500 × 500 mm.\n") + message
-            : "No se pudo generar la familia.\n" + message);
-        return result;
+        return new(result, output, string.Join(Environment.NewLine, errors));
     }
 
     private static string? SelectTemplate(string configuredDirectory)
@@ -132,4 +140,6 @@ internal static class FamilyFileWorkflow
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 }
+
+internal sealed record FamilyWorkflowOutcome(Result Status, string? OutputPath, string Message);
 
