@@ -224,10 +224,17 @@ internal sealed class PhotoFamilyWindow : Window
     private async Task GenerateAsync(CancellationToken token,bool rejectedRetry)
     {
         if(photoPath is null)throw new ArgumentException("Seleccione y valide una fotografía primero.");
+        string? rejectedFingerprint=null;
+        if(rejectedRetry)
+        {
+            if(history.SelectedItem is not HistoryItem {Record.Submission:SubmissionState.Rejected} selected)
+                throw new ArgumentException("Seleccione el rechazo que desea reintentar.");
+            rejectedFingerprint=selected.Record.Fingerprint;
+        }
         if(rejectedRetry && !ConfirmCorrection())return;
         result=null;lastRfa=null;objPath.Text="";rfaPath.Text="";progressBar.Value=0;taskId.Text="";
         SetStatus(IsSimulated?"Generando una simulación con el OBJ fijo de prueba…":"Comprobando fotografía, configuración y tareas existentes…");
-        var generated=await session.GenerateAsync(photoPath,Options(),ConfirmPaidAsync,Progress(),rejectedRetry,token);
+        var generated=await session.GenerateAsync(photoPath,Options(),ConfirmPaidAsync,Progress(),rejectedRetry,token,rejectedFingerprint);
         ShowResult(generated);
     }
     private IProgress<GenerationProgress> Progress()

@@ -1,6 +1,6 @@
 # Etapa 4B — Fotografía, Meshy y Revit
 
-**Integración implementada y validada por simulación; generación real pendiente de autorización y prueba del usuario.** Ninguna prueba de desarrollo debe crear una tarea pagada. El modo inicial es simulado y su transporte no accede a producción.
+**Etapa 4B completada en su alcance simulado; generación real fuera de esta validación.** Ninguna prueba de desarrollo debe crear una tarea pagada. El modo inicial es simulado y su transporte no accede a producción.
 
 ## Arquitectura
 
@@ -58,7 +58,7 @@ La última opción genera `artifacts/stage4b-photo.png`, una imagen sintética l
 
 La instalación copia Core/Revit/Meshy y Revit.deps.json; el OBJ de prueba viaja como recurso embebido. No copia DLL Autodesk. Con Revit cerrado, ejecutar `scripts/Install-Addin.ps1`; con `-Uninstall` elimina exclusivamente el manifiesto y archivos propios conocidos y conserva familias, historial y archivos ajenos.
 
-Resultados de compilación final: solución Release/x64 con SDK 10.0.404, **0 errores y 2 MSB3277 preexistentes** de Autodesk (Microsoft.VisualBasic/System.Drawing). Core: **11 comprobaciones aprobadas**. Meshy/sesión: **185 comprobaciones aprobadas**, incluidas las 125 previas y 60 nuevas. Instalación repetida, cuatro GUID únicos, desinstalación segura con archivo centinela ajeno a la lista y RFA conservado por hash, e instalación final: aprobadas. Los hashes de las tres DLL compiladas/desplegadas coinciden.
+Resultados de compilación final: solución Release/x64 con SDK 10.0.404, **0 errores y 2 MSB3277 preexistentes** de Autodesk (Microsoft.VisualBasic/System.Drawing). Core: **11 comprobaciones aprobadas**. Meshy/sesión: **187 comprobaciones aprobadas**, incluidas las 125 de 4A y 62 de 4B. Instalación repetida, cuatro GUID únicos, desinstalación segura con archivo centinela ajeno a la lista y RFA conservado por hash, e instalación final: aprobadas. Los hashes de las tres DLL compiladas/desplegadas coinciden.
 
 Pruebas reales de interfaz/API local realizadas en Revit 2027.2 con transporte Meshy simulado:
 
@@ -71,7 +71,7 @@ Pruebas reales de interfaz/API local realizadas en Revit 2027.2 con transporte M
 | I | Desde el proyecto de prueba: `BIMFamilyAI_TestCube_500mm_6.rfa` (454656 bytes), `BIMFamilyAI_ParametricBox_5.rfa` (458752 bytes) y `cube_500mm_2.rfa` (454656 bytes; mm, Z). Los tres comandos informaron éxito; paramétrico/OBJ validaron reapertura. |
 | J | `BFAI_Stage3A_Validation_20261115.rvt` se cerró con Ctrl+W directamente a Inicio, sin pedir guardar. Abrir/inspeccionar el RFA propio sí creó cambios de vista que se descartaron explícitamente al cerrar esa familia; eso no modificó el proyecto. No se cargaron instancias. |
 
-Cancelación/reanudación UI, credencial ausente y comprobación de la última revisión: resultados finales se anotan al completar esa ejecución. Los siete errores API requeridos (401/402/429/timeout/tarea fallida/URL vencida/OBJ inválido) ya se ejercitaron en el simulador de ejecución y en la sesión, además de los tests de transporte 4A. También se verificaron conciliación con evidencia, reintento corregido con aprobación nueva, cancelación de autorización sin reserva/POST y cambio de foto tras confirmar que invalida la aprobación. No se atribuye a esos tests ejecución de Autodesk fuera de Revit.
+Cierre de la ejecución interrumpida (16/11/2026): se retomó `main` limpio, commit `2403f1a` (Etapa 4B-1), coincidente con `origin/main` local, sin descartar cambios ni publicar. La cancelación lenta anterior conservó el ID `9a46c29c-ba72-44a9-8b98-331b6374fa8d`. En esta ejecución, tras reiniciar Revit/ventana, se seleccionó ese Pending y se reanudó en escenario Normal: mismo ID, SUCCEEDED, OBJ validado, POST=0, GET=4, descargas=1. El hash del archivo coincide con el fixture `cube_500mm.obj`; no es una reconstrucción IA. Cambiar a Real mostró el aviso de MESHY_API_KEY ausente y el historial real vacío, sin pulsar Generar ni consultar producción. El test de política real con handlers falsos comprobó además cero solicitudes y cero reservas sin credencial. Los siete errores API requeridos (401/402/429/timeout/tarea fallida/URL vencida/OBJ inválido) ya se ejercitaron en el simulador de ejecución y en la sesión, además de los tests de transporte 4A. También se verificaron conciliación con evidencia, reintento corregido con aprobación nueva, cancelación de autorización sin reserva/POST y cambio de foto tras confirmar que invalida la aprobación. No se atribuye a esos tests ejecución de Autodesk fuera de Revit.
 
 **Cero POST de generación enviados a producción, cero generaciones pagadas y cero créditos consumidos por esta implementación.** Tampoco se realizaron GET/descargas de producción Meshy. Solo se consultó documentación pública. No se ha probado que funcione la API/CDN de producción con una cuenta real.
 
@@ -118,3 +118,25 @@ La API/CDN y credenciales reales, el costo aplicado a una cuenta real, la calida
 El importador conserva límites de 3B; no se elevan para acomodar mallas incompatibles. La importación oficial es síncrona y no tiene cancelación a mitad de la llamada. Los resultados son familias geométricas; para geometría que responda a parámetros nativos use el comando de 3A.
 
 No se realizan commits, publicaciones ni cambios remotos. No se avanza a etapa 5.
+
+## Cierre: revisión técnica y verificaciones adicionales
+
+Se demostró y corrigió únicamente un defecto: el botón de reintento de un rechazo podía usar la foto/perfil actuales sin comprobar su asociación al registro seleccionado. Ahora la ventana captura la huella seleccionada y la sesión exige que coincida con la foto y opciones antes de consultar/reutilizar, pedir autorización o crear una reserva. Dos comprobaciones nuevas demuestran rechazo de la discrepancia y ausencia de POST/reserva adicional. Se reforzó también la comprobación de credencial ausente para verificar historial vacío.
+
+Cambios de esta ejecución: `PhotoGenerationSession.cs`, `PhotoFamilyWindow.cs`, `Stage4bChecks.cs` y este informe. README y arquitectura se revisaron y no necesitaron cambios. No se modificaron los algoritmos geométricos, comandos anteriores, instalador ni GUID.
+
+La revisión técnica confirma que las continuaciones de ventana vuelven al dispatcher WPF; el callback de aprobación se entrega explícitamente con Dispatcher. Los Task.Run se limitan a imagen y contratos Core. La sesión tiene exclusión Interlocked y la ventana bloquea acciones mientras hay una operación. El cierre cancela el seguimiento y espera la operación antes de disponer el cliente; los callbacks de progreso comprueban closed/version. La limpieza de ExternalEvent y su suscripción ocurre en Execute/ApplicationClosing. Un fallo de importación conserva ID/OBJ.
+
+ExternalEvent se probó con el comando Muro activo, sin dibujar: Crear RFA quedó encolado y los controles se deshabilitaron; Escape terminó Muro y ejecutó una sola importación, guardando/reabriendo `SIM_Familia_Foto_1.rfa` (750 mm, 454656 bytes), sin POST/GET/descargas. Se repitió la cola, se cerró la ventana antes de terminar Muro y después se pulsó Escape: no se creó otro RFA. Los dos RFA anteriores permanecieron, sin documento de familia activado ni error visible.
+
+La regresión paramétrica anterior ejecutó CreateAndValidate y ValidateSaved dentro de Revit: cambio de Ancho/Profundidad/Altura a 1400/800/950, comprobación de caja y asociación de Material/altura tras reapertura, con rollback de las comprobaciones. El importador validó categoría Modelo genérico, escala, centrado, base y geometría antes y después de guardar. Esto complementa la inspección visual del cubo de 750 mm ya documentada; no se presenta como una nueva inspección visual manual de materiales.
+
+Registros locales de esta ejecución: `artifacts/stage4b-closure-build.log`, `stage4b-closure-core.log`, `stage4b-closure-checks.log`, `stage4b-closure-install.log` (ignorados por Git). Instalación actualizada con Revit cerrado: cuatro comandos/GUID únicos y únicamente Core.dll, Meshy.dll, Revit.dll y Revit.deps.json; los tres hashes de DLL desplegadas coinciden con la compilación.
+
+La revisión instalada también se probó cerrando la ventana durante seguimiento lento (perfil 4002): POST simulado=1, ID `b8487e43-0dd1-491e-bab9-b0f49332e58c`, Pending/0 y sin descarga. La ventana volvió a abrir correctamente y mostró ese ID en historial; el seguimiento anterior había terminado localmente. No se detectaron errores visibles ni duplicados. Estas observaciones y la revisión del código verifican el ciclo funcional; no se hizo un perfilado de memoria ni una prueba de estrés de fugas de recursos.
+
+Reanudación de la última revisión instalada: `b8487e43-0dd1-491e-bab9-b0f49332e58c` alcanzó SUCCEEDED y OBJ válido al pulsar Continuar en Normal, con POST=0, GET=4 y descarga=1. Después se cerró Revit normalmente mediante su X, manteniendo abierta la ventana del complemento: ambas ventanas desaparecieron, el proceso terminó sin forzarlo y sin diálogo de error/guardado. `journal.0057.txt` finalizó con ExitNativeInstance y finished recording journal file; no apareció una excepción del complemento al cerrar. Esta prueba cubre ApplicationClosing con la ventana abierta y en reposo; el cierre durante seguimiento se probó en la ventana, como se detalla arriba.
+
+**Resultado de cierre: completada la etapa 4B simulada.** Compilación Release/x64: 0 errores, 2 MSB3277 preexistentes sin ocultar. Core=11 y Meshy=187 aprobadas. `git diff --check` sin errores de espacios; Git avisa de conversión LF/CRLF en los archivos editados, sin cambios de contenido derivados. Se revisó el diff completo: solo los cuatro archivos enumerados arriba. No se crearon commits ni publicaciones. Se conservaron diarios, OBJ y RFA. Cero solicitudes Meshy de producción y cero créditos consumidos.
+
+No queda una acción manual necesaria para cerrar la simulación. El complemento corregido está instalado; Revit se dejó cerrado tras la prueba de cierre. Para repetir, abra Revit y use el cuarto comando en Prueba (simulado, 0 créditos). La integración queda preparada para una futura prueba real autorizada por el usuario; credenciales reales, conectividad API/CDN, facturación y calidad IA no se han validado y no forman parte de este cierre. No se inició etapa 5.

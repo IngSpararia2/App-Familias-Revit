@@ -20,7 +20,8 @@ public sealed class PhotoGenerationSession : IDisposable
 
     public async Task<GeneratedObjResult> GenerateAsync(string path, MeshyOptions options,
         Func<LocalImage,MeshyOptions,Task<PaidGenerationApproval?>>? authorize = null,
-        IProgress<GenerationProgress>? progress=null, bool retryRejected=false, CancellationToken cancellationToken=default)
+        IProgress<GenerationProgress>? progress=null, bool retryRejected=false, CancellationToken cancellationToken=default,
+        string? expectedRejectedFingerprint=null)
     {
         Enter();
         try
@@ -28,6 +29,8 @@ public sealed class PhotoGenerationSession : IDisposable
             LastTaskId=null;Result=null;
             var image=await Task.Run(()=>LocalImage.ReadAsync(path,cancellationToken),cancellationToken).ConfigureAwait(false);
             options.Validate();
+            if (retryRejected && expectedRejectedFingerprint is not null && expectedRejectedFingerprint!=options.Fingerprint(image.Sha256))
+                throw new MeshyException(MeshyError.InvalidInput,"La fotografía y configuración no corresponden al rechazo seleccionado. Seleccione la fotografía y perfil originales antes de reintentar.");
             var existing=(await store.ReadAsync(cancellationToken).ConfigureAwait(false)).SingleOrDefault(r=>r.Fingerprint==options.Fingerprint(image.Sha256));
             if (existing?.TaskId is { } known) return await ResumeCoreAsync(known,progress,cancellationToken).ConfigureAwait(false);
             if (existing is not null && !retryRejected)

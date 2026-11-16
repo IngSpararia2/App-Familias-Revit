@@ -65,7 +65,7 @@ internal static class Stage4bChecks
             var api=new FakeHandler();using var real=MeshyClient.CreateRealForChecks(api,new FakeHandler(),new(MeshyMode.Real,s.DirectoryPath));
             using var session=new PhotoGenerationSession(real,new(MeshyMode.Real,s.DirectoryPath));
             await Reject(()=>session.GenerateAsync(s.Image,new(),(_,_)=>throw new Exception("No confirmation before checking missing credential")),MeshyError.MissingCredential,"missing credential before confirmation/send");
-            check(api.Calls==0,"4B real policy cannot send without credential");
+            check(api.Calls==0 && (await session.HistoryAsync()).Count==0,"4B real policy cannot send or reserve without credential");
         }
         foreach(var (scenario,error,known) in new[] {
             (SimulationScenario.Unauthorized,MeshyError.InvalidCredential,false),(SimulationScenario.NoCredits,MeshyError.NoCredits,false),
@@ -99,6 +99,9 @@ internal static class Stage4bChecks
                 await Reject(()=>first.GenerateAsync(s.Image,new()),MeshyError.InvalidCredential,"confirmed rejected attempt");
             var normal=MeshySimulation.Create(s.Store,delay:NoWait);using var session=new PhotoGenerationSession(normal.Client,s.Store);
             await Reject(()=>session.GenerateAsync(s.Image,new()),MeshyError.Duplicate,"rejected attempt never retried automatically");
+            var selected=(await s.Store.ReadAsync()).Single();
+            await Reject(()=>session.GenerateAsync(s.Image,new(4001),retryRejected:true,expectedRejectedFingerprint:selected.Fingerprint),MeshyError.InvalidInput,"selected rejection must match photo and profile");
+            check(normal.CreationRequests==0 && (await s.Store.ReadAsync()).Count==1,"4B history mismatch creates no task or reservation");
             var result=await session.GenerateAsync(s.Image,new(),retryRejected:true);
             var record=(await s.Store.ReadAsync()).Single();
             check(record.Audit.Single().Action==TaskAuditAction.RetriedConfirmedRejection && record.Audit[0].PreviousError==MeshyError.InvalidCredential && normal.CreationRequests==1,"4B explicit corrected retry preserves rejection audit");
