@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup Condition="'$(RevitInstallDir)' == ''">
+    <RevitInstallDir Condition="'$(REVIT_2027_DIR)' != ''">$(REVIT_2027_DIR)</RevitInstallDir>
+    <RevitInstallDir Condition="'$(RevitInstallDir)' == '' and Exists('C:\Program Files\Autodesk\Revit 2027\RevitAPI.dll')">C:\Program Files\Autodesk\Revit 2027</RevitInstallDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'BimFamilyAI.Revit' and Exists('$(RevitInstallDir)\RevitAPI.dll') and Exists('$(RevitInstallDir)\RevitAPIUI.dll')">
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

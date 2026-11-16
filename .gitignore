@@ -1,0 +1,27 @@
+# .NET / Visual Studio
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+*.cache
+artifacts/
+
+# Revit local/build artifacts
+*.rvt
+*.rfa
+*.rte
+*.rft
+*.addin
+RevitAddinUtility.dll
+
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+secrets.json
+
+# OS
+Thumbs.db
+Desktop.ini
