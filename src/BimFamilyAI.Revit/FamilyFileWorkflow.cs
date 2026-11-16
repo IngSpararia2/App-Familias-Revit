@@ -21,13 +21,14 @@ internal static class FamilyFileWorkflow
 
     // Must be called exclusively from a valid Revit command or ExternalEvent.Execute context.
     internal static FamilyWorkflowOutcome CreateFamily(Autodesk.Revit.ApplicationServices.Application app,
-        bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null)
+        bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null, bool editMaterials = false)
     {
         Document? family = null;
         string? staging = null;
         string? output = null;
         var errors = new List<string>();
         var result = Result.Failed;
+        ImportedMaterialDialog.Choice? materialChoice = null;
         try
         {
             var template = SelectTemplate(app.FamilyTemplatePath);
@@ -40,7 +41,19 @@ internal static class FamilyFileWorkflow
             if (!family.IsFamilyDocument || family.OwnerFamily.FamilyCategory.Id != new ElementId(BuiltInCategory.OST_GenericModel))
                 throw new InvalidOperationException("Seleccione una plantilla de Modelo genérico, sin anfitrión ni componentes adaptativos.");
 
-            if (obj is not null) ObjFamilyImporter.Import(family, obj);
+            if (obj is not null)
+            {
+                var originalMaterials = new FilteredElementCollector(family).OfClass(typeof(Material)).ToElementIds().ToHashSet();
+                ObjFamilyImporter.Import(family, obj);
+                if (editMaterials)
+                {
+                    var dialog = new ImportedMaterialDialog(family, obj.FamilyName);
+                    if (dialog.ShowDialog() != true) return new(Result.Cancelled,null,"Creación cancelada; OBJ conservado.");
+                    materialChoice = dialog.Selected;
+                    if (materialChoice is { } m) ImportedMaterials.Apply(family,m.Name,m.Red,m.Green,m.Blue,originalMaterials,obj);
+                    ObjFamilyImporter.ValidateSaved(family,obj);
+                }
+            }
             else if (parametric) ParametricBoxBuilder.CreateAndValidate(family);
             else
             {
@@ -87,6 +100,7 @@ internal static class FamilyFileWorkflow
                 family = app.OpenDocumentFile(temporary);
                 if (obj is not null) ObjFamilyImporter.ValidateSaved(family, obj);
                 else ParametricBoxBuilder.ValidateSaved(family);
+                if (materialChoice is { } m) ImportedMaterials.Validate(family,m.Red,m.Green,m.Blue);
                 if (!family.Close(false)) throw new IOException("No se pudo cerrar la familia reabierta.");
                 family = null;
             }

@@ -28,6 +28,7 @@ internal sealed class PhotoFamilyWindow : Window
     private readonly Image preview=new() {Height=135,Stretch=Stretch.Uniform};
     private readonly ProgressBar progressBar=new() {Minimum=0,Maximum=100,Height=12};
     private readonly ListBox history=new() {Height=110};
+    private readonly CheckBox editMaterials=new() {Content="Materiales y apariencia: elegir antes de guardar (sin generar IA)",Margin=new Thickness(0,8,0,4)};
     private readonly List<Control> controls=[];
     private Button stop=null!, createRfa=null!, openRfa=null!, reconcile=null!, retry=null!;
     private PhotoGenerationSession session=null!;
@@ -93,6 +94,8 @@ internal sealed class PhotoFamilyWindow : Window
         retry=AddButton(recovery,"Reintentar rechazo corregido",()=>Run(token=>GenerateAsync(token,true)));
         var output=Section(right,"2. Crear familia RFA desde el OBJ conservado");
         Field(output,"OBJ local",objPath);
+        output.Children.Add(editMaterials);controls.Add(editMaterials);
+        Label(output,"Conservar original por defecto. La selección se abre en Revit y afecta solo al nuevo RFA; requiere un OBJ recuperado. No cambia el RFA anterior.");
         createRfa=AddButton(output,"Crear familia RFA (requiere altura confirmada)",()=>Run(CreateRfaAsync,false));
         Field(output,"Último RFA creado",rfaPath);
         var locations=new WrapPanel();output.Children.Add(locations);
@@ -307,7 +310,7 @@ internal sealed class PhotoFamilyWindow : Window
         var obj=result;
         var request=await Task.Run(()=>PhotoFamilyRequest.Create(obj,mm,vertical,familyName,details,simulated),token);
         token.ThrowIfCancellationRequested();SetStatus("Solicitud encolada para Revit. Termine cualquier comando activo. La importación nativa puede ocupar temporalmente la interfaz.");
-        var outcome=await bridge.Enqueue(new(request,null));
+        var outcome=await bridge.Enqueue(new(request,null,editMaterials.IsChecked==true));
         if(outcome.OutputPath is not null) {lastRfa=outcome.OutputPath;rfaPath.Text=lastRfa;}
         SetStatus(outcome.Status==Autodesk.Revit.UI.Result.Succeeded ? "RFA creado y verificado tras reabrir. Escala uniforme por altura confirmada. "+outcome.Message : "No se creó el RFA: "+outcome.Message+" El OBJ sigue disponible; corrija los datos y repita solo Crear familia RFA.");
     }

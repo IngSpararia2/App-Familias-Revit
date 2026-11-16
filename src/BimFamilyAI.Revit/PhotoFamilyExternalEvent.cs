@@ -4,7 +4,7 @@ using BimFamilyAI.Core;
 
 namespace BimFamilyAI.Revit;
 
-internal sealed record PhotoRevitRequest(ObjImportRequest? Import, string? OpenRfaPath);
+internal sealed record PhotoRevitRequest(ObjImportRequest? Import, string? OpenRfaPath, bool EditMaterials = false);
 
 /// <summary>One immutable request at a time. All Autodesk work stays in Execute.</summary>
 internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
@@ -51,7 +51,7 @@ internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
         try
         {
             if (request.Import is { } import)
-                result.TrySetResult(FamilyFileWorkflow.CreateFamily(application.Application,false,import));
+                result.TrySetResult(FamilyFileWorkflow.CreateFamily(application.Application,false,import,request.EditMaterials));
             else
             {
                 string path=request.OpenRfaPath!;

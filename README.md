@@ -1,8 +1,8 @@
-# BIM Family AI — Etapa 4B
+# BIM Family AI — Etapa 5A
 
 Cuarto comando: **Complementos → Herramientas externas → BIM Family AI — Crear familia desde fotografía**. Abre una ventana no modal con fotografía/vista previa, Meshy T2, historial, seguimiento, recuperación y creación de RFA mediante ExternalEvent.
 
-**Integración implementada y validada por simulación; generación real pendiente de autorización y prueba del usuario.** El modo inicial es **Prueba (simulado, 0 créditos)**. Utiliza un OBJ fijo, claramente identificado; no interpreta la foto ni accede a producción. La primera generación pagada solo debe realizarla el usuario desde la interfaz, tras confirmar expresamente costo y envío.
+**Integración validada por simulación; el usuario confirmó además una generación real de silla. Esta etapa 5A reutiliza el OBJ local sin enviar solicitudes Meshy.** El modo inicial es **Prueba (simulado, 0 créditos)**. Utiliza un OBJ fijo, claramente identificado; no interpreta la foto ni accede a producción. La primera generación pagada solo debe realizarla el usuario desde la interfaz, tras confirmar expresamente costo y envío.
 
 Uso rápido: seleccione foto → Generar modelo 3D → confirme altura física real en mm y eje → Crear familia RFA → Abrir RFA en Revit. Son operaciones independientes: un fallo de Revit permite repetir el RFA con el mismo OBJ sin pagar otra generación. Sin altura conocida puede conservar el OBJ.
 
@@ -104,8 +104,8 @@ El comando verifica la caja de la extrusión antes de confirmar la transacción.
 - Plantilla inválida: seleccione la estándar sin anfitrión de Revit 2027.
 - Guardado fallido: revise permisos de Documentos y el detalle mostrado en el diálogo.
 
-## Próxima etapa: 5 (sin iniciar)
+## Materiales y apariencia (etapa 5A)
 
-La etapa 4B integra el servicio y su interfaz mínima; la comprobación de producción sigue pendiente del usuario. No hay análisis OpenAI, interfaz comercial definitiva ni conversión universal de mallas a geometría paramétrica. Las etapas 2, 3A y 3B conservan sus funciones; sus informes distinguen variantes pendientes.
+Con un OBJ ya recuperado, marque **Materiales y apariencia** antes de Crear RFA. Puede conservar original, aplicar RGB uniforme o copiar el color gráfico de un material de la familia nueva. Se guarda otro RFA sin cambiar geometría ni generar IA. El RGB se verifica al reabrir; corresponde a Sombreado y no configura texturas ni apariencia Realista. Véase [validación y límites 5A](docs/stage5a-validation.md). La generación real de la silla fue confirmada por el usuario; esta etapa reutiliza su OBJ local sin llamadas Meshy. Etapa 5B sin iniciar.
 
 Referencias oficiales: https://help.autodesk.com/cloudhelp/2027/ENU/Revit-API/files/Revit_API_Developers_Guide/Introduction/Getting_Started/Using_the_Autodesk_Revit_API/Revit_API_Revit_API_Developers_Guide_Introduction_Getting_Started_Using_the_Autodesk_Revit_API_Registration_of_add_ins_html.html
