@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BimFamilyAI.Core", "src\Bim
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BimFamilyAI.Revit", "src\BimFamilyAI.Revit\BimFamilyAI.Revit.csproj", "{25235208-A315-4C61-9BCA-46C49E601DE1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BimFamilyAI.Meshy", "src\BimFamilyAI.Meshy\BimFamilyAI.Meshy.csproj", "{784926E2-E5FD-43E8-A30A-B2B6BAB1B107}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -20,5 +22,9 @@ Global
 		{25235208-A315-4C61-9BCA-46C49E601DE1}.Debug|x64.Build.0 = Debug|x64
 		{25235208-A315-4C61-9BCA-46C49E601DE1}.Release|x64.ActiveCfg = Release|x64
 		{25235208-A315-4C61-9BCA-46C49E601DE1}.Release|x64.Build.0 = Release|x64
+		{784926E2-E5FD-43E8-A30A-B2B6BAB1B107}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{784926E2-E5FD-43E8-A30A-B2B6BAB1B107}.Debug|x64.Build.0 = Debug|Any CPU
+		{784926E2-E5FD-43E8-A30A-B2B6BAB1B107}.Release|x64.ActiveCfg = Release|Any CPU
+		{784926E2-E5FD-43E8-A30A-B2B6BAB1B107}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

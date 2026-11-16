@@ -1,4 +1,21 @@
-# BIM Family AI — Etapa 3B
+# BIM Family AI — Etapa 4A
+
+Integración Meshy Image to 3D implementada como biblioteca independiente de Autodesk, **validada únicamente con HTTP simulado**. No se ha creado ninguna tarea real ni consumido créditos. No necesita clave para las pruebas y no añade comandos a Revit.
+
+`BimFamilyAI.Core` define los contratos; `BimFamilyAI.Meshy` prepara JPG/JPEG, PNG y WebP locales como Data URI, reserva intentos para evitar duplicados, conserva IDs en JSON, consulta estados con Retry-After y descarga/valida OBJ reutilizables mediante `ObjInspection`. El resultado construye el `ObjImportRequest` existente con unidades y dimensión física confirmadas por el usuario. El perfil inicial es Smart Topology / Meshy T2, 4000 caras, sin texturas, solo OBJ.
+
+```powershell
+dotnet run --project .\tests\BimFamilyAI.Meshy.Checks -c Release -- tests/fixtures
+dotnet run --project .\tests\BimFamilyAI.Core.Checks -c Release -- tests/fixtures
+```
+
+Los tests usan manejadores HTTP en memoria y carpetas temporales propias. El almacén normal está en `%LOCALAPPDATA%\BIM Family AI\Meshy\Simulated` o `Real`, separado del repositorio. No contiene claves, base64 ni enlaces firmados. Un intento incierto permanece bloqueado hasta reconciliarlo; nunca borre el registro para resolver un timeout.
+
+El modo real exige habilitación explícita, `MESHY_API_KEY` y confirmación de una nueva generación para la imagen/configuración concreta. **No lo active durante esta etapa.** La interfaz, autorización de uso real y entrega a Revit mediante su hilo válido corresponden a 4B. Cancelar seguimiento local no cancela la tarea del proveedor.
+
+Vea [arquitectura](docs/architecture.md) e [informe 4A](docs/stage4a-validation.md) para pruebas, límites, decisiones, diferencias con la documentación oficial y preparación de 4B.
+
+## Funciones Revit implementadas (etapas 2, 3A y 3B)
 
 Nuevo comando: **Complementos → Herramientas externas → BIM Family AI — Importar OBJ como familia**. Seleccione un OBJ local, sus unidades y eje vertical; opcionalmente indique altura objetivo en mm y confirme el nombre. La escala es uniforme y el resultado queda centrado en X/Y, con base Z=0, en Documentos/BIM Family AI/Generated. Ancho, Profundidad y Altura del OBJ son **informativos**, no controlan la malla.
 
@@ -75,8 +92,8 @@ El comando verifica la caja de la extrusión antes de confirmar la transacción.
 - Plantilla inválida: seleccione la estándar sin anfitrión de Revit 2027.
 - Guardado fallido: revise permisos de Documentos y el detalle mostrado en el diálogo.
 
-## Etapa 3B
+## Próxima etapa: 4B (sin iniciar)
 
-Pendiente de definir e implementar después de validar esta entrega. IA, OBJ y WPF completo quedan pendientes. Para claves futuras usar variables de entorno o configuración local excluida de Git; nunca guardar secretos en código.
+Integrar el servicio asíncrono en la interfaz, mostrar costo y confirmación, seleccionar escala real y entregar el OBJ al importador mediante un contexto válido de Revit API. No hay análisis OpenAI ni interfaz WPF definitiva en esta entrega. Las etapas 2, 3A y 3B ya están implementadas y probadas; sus informes distinguen las variantes aún pendientes.
 
 Referencias oficiales: https://help.autodesk.com/cloudhelp/2027/ENU/Revit-API/files/Revit_API_Developers_Guide/Introduction/Getting_Started/Using_the_Autodesk_Revit_API/Revit_API_Revit_API_Developers_Guide_Introduction_Getting_Started_Using_the_Autodesk_Revit_API_Registration_of_add_ins_html.html

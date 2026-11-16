@@ -1,51 +1,52 @@
-# Arquitectura mínima
+# Arquitectura de BIM Family AI
 
-## Etapa 3B
+## Componentes actuales
 
-Core añade ObjImportRequest y ObjInspection, sin Autodesk: selección de unidades/eje y lectura estructural limitada del OBJ. ImportObjFamilyCommand recoge opciones; ObjFamilyImporter realiza importación nativa, transformación, datos BIM y validación. FamilyFileWorkflow contiene el ciclo de plantilla y guardado antes incluido en GenerateTestFamilyCommand; los tres comandos lo reutilizan. La futura entrada Meshy podrá proporcionar un archivo y ObjImportRequest al mismo importador. No se implementan servicios IA en esta etapa.
-
-## Etapa 3A
-
-GenerateParametricFamilyCommand delega el ciclo de documento/plantilla/guardado al flujo existente de GenerateTestFamilyCommand, conservando el generador fijo. ParametricBoxBuilder concentra las restricciones y validación de una única extrusión: planos, cotas de semidimensiones con fórmulas, altura y material asociados. No añade dependencias ni lógica Autodesk a Core. El archivo temporal se reabre y se valida antes de entregar el RFA final. Ver stage3a-validation.md para resultados y pendientes.
-
-## Límites actuales
-
-- **BimFamilyAI.Core**: modelos de entrada/salida, validaciones y contratos puros de C#. Sin Autodesk, red ni dependencias de proveedores.
-- **BimFamilyAI.Revit**: adaptador para Revit 2027 y destino `net10.0-windows` x64. Referencia Core y las DLL locales de Revit, sin redistribuirlas.
-- **Servicios de IA (futuro)**: adaptadores separados para análisis de imagen/OpenAI y generación 3D/Meshy. Core definirá los datos intercambiados; claves mediante variables de entorno o configuración local ignorada por Git.
-- **WPF (futuro)**: interfaz de escritorio que orquesta el flujo y presenta estado/errores sin contener lógica de Revit.
-
-## Flujo previsto
+- **BimFamilyAI.Core**, net10.0: contratos de generación independientes del proveedor, estados/progreso y resultado OBJ; ObjImportRequest y ObjInspection existentes. Sin Autodesk, HTTP ni credenciales.
+- **BimFamilyAI.Meshy**, net10.0: adaptador Image to 3D con entrada local, perfil económico T2, cliente HTTP asíncrono, seguimiento, descarga y diario JSON. Referencia solo Core. No añade paquetes externos.
+- **BimFamilyAI.Revit**, net10.0-windows x64: tres comandos, geometría nativa, familia paramétrica e importación OBJ; único proyecto que conoce Autodesk. Referencia Core. Meshy aún no se conecta a este proyecto ni a su instalador.
+- **Comprobaciones**: ejecutables Core.Checks y Meshy.Checks independientes de Autodesk; fixtures propios y transporte HTTP en memoria.
 
 ```text
-Fotografía → análisis visual → generación 3D → OBJ
-                                        ↓
-                         Revit API convierte/importa
-                                        ↓
-                                      RFA
+Foto local -> LocalImage -> MeshyClient -> ID / estados -> OBJ local validado
+                              |                              |
+                      JsonTaskStore                    GeneratedObjResult
+                              |                              |
+                  LocalAppData/Simulated o Real       ObjImportRequest
+                                                             |
+                                         [coordinación UI/hilo: futura 4B]
+                                                             |
+                                              ObjFamilyImporter (Revit)
+                                                             |
+                                               FamilyFileWorkflow -> RFA
 ```
 
-La primera modalidad será una familia geométrica basada en geometría 3D importada. Más adelante podrá añadirse una modalidad paramétrica que traduzca dimensiones y características a geometría nativa de Revit. La creación y guardado de RFA ocurre dentro del adaptador Revit, que es el único módulo que debe conocer la API de Autodesk.
+## Integración Meshy (4A)
 
-## Decisiones de esta etapa
+LocalImage inspecciona contenedor, formato y dimensiones de JPG/JPEG, PNG y WebP y conserva bytes/hash para preparar Data URI en memoria. No sube fotos a un servidor público ni persiste base64. Es inspección de metadatos/estructura, no decodificación completa de píxeles. MeshyOptions expone únicamente el perfil compatible implementado: Smart Topology/T2, 4000 caras configurables entre 100 y 15000, sin texturas y OBJ. Más modelos o proveedores exigirán adaptadores/perfiles explícitos: no se añaden ahora interfaces sin uso.
 
-- Aplicación local, sin backend ni base de datos.
-- Solo se crean Core y el límite Revit; no hay proyectos vacíos para UI o proveedores.
-- Las referencias API se resuelven centralmente mediante `RevitInstallDir` o `REVIT_2027_DIR` y no se copian al directorio de salida.
-- No se añaden paquetes NuGet ni credenciales. En etapa 2 se incorpora `GenerateTestFamilyCommand` y el script genera el manifiesto local sin rutas versionadas.
+CreateAsync valida, consulta la huella imagen+perfil y guarda una reserva antes del único POST. Guarda el ID inmediatamente al recibirlo. Intentos inciertos o rechazados permanecen bloqueados para evitar consumos duplicados. RecoverAsync reanuda por ID sin fotografía ni POST. QueryAsync/TrackAsync interpretan estados y progreso; esperan Retry-After o al menos 5 segundos. Solo GET tiene reintentos transitorios limitados. La cancelación es local: la tarea del proveedor puede continuar y el ID se conserva.
 
-## Entorno detectado en esta máquina
+GetResultAsync reutiliza primero la copia propia validada por ObjInspection y SHA256. Si falta, obtiene un OBJ de una tarea exitosa mediante un cliente sin token. HTTPS y host exacto assets.meshy.ai, sin redirecciones; streams limitados a 50 MiB, temporales propios y publicación sin sobrescritura. Las URLs firmadas solo viven en memoria; la expiración permite una consulta adicional por ID, nunca una generación sustituta. Véanse [documentación y diferencias oficiales](stage4a-validation.md).
 
-- Windows 11 x64 (build 26300).
-- SDK detectados en etapa 2: 10.0.404 y 11.0.100. `global.json` selecciona .NET 10 estable con rollForward latestFeature desde 10.0.100. No se instaló software durante esta ejecución.
-- Revit 2027 presente en `C:\Program Files\Autodesk\Revit 2027`; `RevitAPI.dll` y `RevitAPIUI.dll` disponibles.
-- Git 2.55.0.windows.4 disponible. No se encontró `msbuild` como comando independiente; el SDK de .NET incluye MSBuild.
-- En etapa 1 la carpeta estaba vacía; en etapa 2 existe repositorio Git con origin IngSpararia2/App-Familias-Revit y rama main inicialmente limpia.
+JsonTaskStore conserva exclusivamente metadatos seguros en LocalAppData/BIM Family AI/Meshy, separado por modo. Bloqueo de archivo entre procesos y reemplazo atómico en el mismo volumen. Un JSON corrupto se conserva y bloquea nuevas operaciones hasta reconciliarlo; no se descartan reservas. No almacena claves, fotos/base64 ni enlaces de descarga.
 
-## Etapa 2
+CreateSimulated recibe manejadores simulados y no construye transporte de red. CreateReal exige habilitación expresa; una creación nueva necesita además MESHY_API_KEY y una aprobación consumible ligada a imagen/configuración. No hay activación real desde los tres comandos. La futura interfaz deberá mostrar costo y obtener confirmación antes de construir esa aprobación. No se implementa cancelación remota.
 
-El comando crea un documento independiente, comprueba Modelo genérico, convierte milímetros mediante UnitUtils y crea una extrusión sobre Z=0. Comprueba su caja geométrica antes de confirmar la transacción. SaveAs ocurre después de Commit. El guardado usa una carpeta temporal propia y un movimiento final sin sobrescritura; el documento se cierra y la carpeta temporal se limpia incluso ante errores, comunicando cualquier fallo de limpieza.
+GeneratedObjResult.ToImportRequest exige unidades/eje elegidos y altura opcional explícita; no deduce tamaño físico por fotografía. La importación sigue usando el motor 3B, sin un segundo conversor. La futura 4B debe coordinar espera asíncrona y ejecución de Autodesk mediante contexto válido, sin bloquear la UI ni usar Task.Run para Revit API.
 
-Se habilita WPF solamente para el selector estándar de archivos RFT, sin interfaz propia. La ejecución y apertura de RFA requieren comprobación dentro de Revit. Ver README para el procedimiento completo.
+## Funciones Revit conservadas
 
-Revisar los requisitos actuales en la [guía oficial de migración a .NET 10 para Revit 2027](https://help.autodesk.com/cloudhelp/2027/ENU/Revit-WhatsNew/files/GUID-8D7A4715-EAF8-4BD1-BE78-061F900D0BCE.htm).
+GenerateTestFamilyCommand crea una extrusión sólida de 500 mm. GenerateParametricFamilyCommand usa ParametricBoxBuilder: una extrusión, planos/cotas y fórmulas de semidimensiones para centrado, parámetros de tipo Ancho/Profundidad/Altura/Material, dos tipos y validación de flexión/material y reapertura. Ver [etapa 3A](stage3a-validation.md).
+
+ImportObjFamilyCommand recoge unidades, eje y altura/nombre/descripción. ObjFamilyImporter usa importación nativa OBJ, escala uniforme con UnitUtils y CustomScale explícito, libera la fijación del elemento, rota, centra X/Y y apoya Z=0. Comprueba dimensiones, geometría y parámetros informativos. No reconstruye ni parametriza la malla. Ver [etapa 3B](stage3b-validation.md) para las convenciones de escala comprobadas y cobertura real.
+
+FamilyFileWorkflow selecciona plantilla de Modelo genérico, crea documento independiente, ejecuta el generador/importador y guarda en temporal. Reabre familias paramétricas/OBJ para verificar persistencia y publica con sufijo sin sobrescribir en Documentos/BIM Family AI/Generated. Cierra documentos y comunica errores de limpieza. Es compartido por los tres comandos, sin cambios en 4A.
+
+Límites OBJ conservados: 50 MiB, 250000 vértices, 500000 caras, 1024 índices/cara, 65536 caracteres/línea y coordenadas finitas hasta 1e8. El importador limita diagonal física a 0.1 mm–100 m y verifica centrado/base/dimensiones. ObjInspection es validación estructural; Autodesk puede rechazar una malla que la supere.
+
+## Compilación, instalación y límites
+
+Windows/Revit 2027.2 instalados; SDK 10.0.404 seleccionado por global.json desde 10.0.100 con latestFeature. Directory.Build.targets resuelve RevitInstallDir/REVIT_2027_DIR; referencias Autodesk con Private=false y error claro si faltan. El script existente instala solamente las DLL propias de Core/Revit y un manifiesto con tres GUID fijos. No se distribuyen DLL ni plantillas Autodesk.
+
+La solución conserva configuraciones x64. Las dos advertencias MSB3277 de Microsoft.VisualBasic/System.Drawing provienen de dependencias de Autodesk y ya existían; no se ocultan. No hay backend, base de datos, cloud propio, OpenAI, Blender ni editor de imágenes. WPF se limita a los selectores/formulario existentes; la interfaz definitiva y la integración visible Meshy quedan para 4B, sin iniciar.
