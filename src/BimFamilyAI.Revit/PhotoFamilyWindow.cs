@@ -20,17 +20,18 @@ internal sealed class PhotoFamilyWindow : Window
     private readonly ComboBox mode=new() {ItemsSource=new[] {"Prueba (simulado, 0 créditos)","Real (Meshy API, puede consumir créditos)"},SelectedIndex=0};
     private readonly ComboBox scenario=new() {ItemsSource=new[] {"Normal","Seguimiento lento","HTTP 401","HTTP 402","HTTP 429","Timeout de creación","Tarea fallida","URL vencida","OBJ inválido","Creación incierta"},SelectedIndex=0};
     private readonly ComboBox axis=new() {ItemsSource=new[] {"Z","Y","X"},SelectedIndex=0};
-    private readonly TextBox polycount=new() {Text="4000",Width=80};
+    private readonly TextBox polycount=new() {Text="4000",Width=90,HorizontalAlignment=HorizontalAlignment.Left};
     private readonly TextBox name=new() {Text="SIM_Familia_Foto"}, description=new() {AcceptsReturn=true,Height=43}, height=new();
     private readonly TextBox taskId=new(), objPath=new() {IsReadOnly=true,TextWrapping=TextWrapping.Wrap,Height=42}, rfaPath=new() {IsReadOnly=true,TextWrapping=TextWrapping.Wrap,Height=42};
     private readonly TextBlock modeNotice=new(), photoName=new() {Text="Seleccione una fotografía local.",TextWrapping=TextWrapping.Wrap}, previewNotice=new() {TextWrapping=TextWrapping.Wrap};
     private readonly TextBlock status=new() {Text="Modo de prueba: sin clave, sin red Meshy y sin costo.",TextWrapping=TextWrapping.Wrap}, traffic=new() {TextWrapping=TextWrapping.Wrap};
+    private readonly TextBlock phase=new() {TextWrapping=TextWrapping.Wrap,FontWeight=FontWeights.SemiBold};
     private readonly Image preview=new() {Height=135,Stretch=Stretch.Uniform};
     private readonly ProgressBar progressBar=new() {Minimum=0,Maximum=100,Height=12};
     private readonly ListBox history=new() {Height=110};
     private readonly CheckBox editMaterials=new() {Content="Materiales y apariencia: elegir antes de guardar (sin generar IA)",Margin=new Thickness(0,8,0,4)};
     private readonly List<Control> controls=[];
-    private Button stop=null!, createRfa=null!, openRfa=null!, reconcile=null!, retry=null!;
+    private Button stop=null!, generate=null!, query=null!, resume=null!, createRfa=null!, openRfa=null!, reconcile=null!, retry=null!, objFolder=null!, rfaFolder=null!;
     private PhotoGenerationSession session=null!;
     private JsonTaskStore store=null!;
     private MeshySimulation? simulation;
@@ -44,66 +45,82 @@ internal sealed class PhotoFamilyWindow : Window
     private bool IsSimulated=>mode.SelectedIndex==0;
     private sealed record HistoryItem(MeshyTaskRecord Record)
     {
-        public override string ToString()=> $"{(Record.TaskId is null ? Record.Submission.ToString() : Record.State?.ToString() ?? "Conocida")} · {Record.TaskId ?? "RESERVA SIN ID"} · {Record.Fingerprint[..8]}";
+        public override string ToString()=> $"{(Record.State?.ToString() ?? Record.Submission.ToString())} · {(Record.TaskId is null ? "reserva sin ID" : Record.TaskId[..Math.Min(8,Record.TaskId.Length)])} · {(Record.AttemptedAt ?? Record.CreatedAt)?.ToLocalTime().ToString("g") ?? "sin fecha"} · {(Record.Download==DownloadState.Validated ? "OBJ disponible" : "sin OBJ local")}";
     }
 
     internal PhotoFamilyWindow(PhotoFamilyExternalEvent bridge,IntPtr owner)
     {
         this.bridge=bridge;
         Title="BIM Family AI — Generador de familias con IA";
-        Width=1010;Height=740;MinWidth=880;MinHeight=620;FontSize=12;
+        Width=Math.Min(1060,SystemParameters.WorkArea.Width*0.93);
+        Height=Math.Min(790,SystemParameters.WorkArea.Height*0.88);
+        MinWidth=700;MinHeight=400;FontSize=13;
+        Background=new SolidColorBrush(System.Windows.Media.Color.FromRgb(245,247,250));
         WindowStartupLocation=WindowStartupLocation.CenterScreen;
         new System.Windows.Interop.WindowInteropHelper(this).Owner=owner;
         var root=new DockPanel {Margin=new Thickness(16)};Content=root;
-        var top=new StackPanel();DockPanel.SetDock(top,Dock.Top);root.Children.Add(top);
-        top.Children.Add(new TextBlock {Text="Fotografía → modelo OBJ → familia geométrica RFA",FontSize=19,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,8)});
-        top.Children.Add(mode);top.Children.Add(modeNotice);
-        var bottom=new StackPanel {Margin=new Thickness(0,8,0,0)};DockPanel.SetDock(bottom,Dock.Bottom);root.Children.Add(bottom);
-        bottom.Children.Add(progressBar);bottom.Children.Add(status);bottom.Children.Add(traffic);
-        var scroll=new ScrollViewer {VerticalScrollBarVisibility=ScrollBarVisibility.Auto};root.Children.Add(scroll);
-        var columns=new Grid();columns.ColumnDefinitions.Add(new() {Width=new GridLength(330)});columns.ColumnDefinitions.Add(new());scroll.Content=columns;
-        var left=new StackPanel {Margin=new Thickness(0,8,12,0)};var right=new StackPanel {Margin=new Thickness(0,8,0,0)};
-        columns.Children.Add(left);Grid.SetColumn(right,1);columns.Children.Add(right);
-        var photograph=Section(left,"A. Fotografía local");
-        photograph.Children.Add(new Border {Background=Brushes.WhiteSmoke,Child=preview,Margin=new Thickness(0,0,0,5)});
-        photograph.Children.Add(photoName);photograph.Children.Add(previewNotice);
-        AddButton(photograph,"Seleccionar JPG / PNG / WebP",()=>Run(SelectPhotoAsync));
-        var settings=Section(left,"B. Configuración de IA");
-        Label(settings,"Meshy · Image to 3D · Meshy T2 / smart-topology\nTexturas: No · Formato: OBJ");
-        Field(settings,"Polígonos objetivo (100–15000)",polycount);
-        Label(settings,"Costo estimado real: 5 créditos API por tarea.\nTarifa verificada: 16/11/2026; puede cambiar.");
-        var family=Section(left,"C. Datos de la familia");
-        Field(family,"Nombre (la simulación añade SIM_)",name);Field(family,"Descripción (opcional)",description);
-        Field(family,"Altura física real confirmada, en mm (obligatoria)",height);Field(family,"Eje vertical del OBJ",axis);
-        Label(family,"Sin altura puede conservar el OBJ. La malla importada no es una familia paramétrica nativa; sus dimensiones son informativas.");
+        var top=new StackPanel {Margin=new Thickness(0,0,0,10)};DockPanel.SetDock(top,Dock.Top);root.Children.Add(top);
+        top.Children.Add(new TextBlock {Text="BIM Family AI",FontSize=23,FontWeight=FontWeights.SemiBold,Foreground=Accent(),Margin=new Thickness(0,0,0,3)});
+        Label(top,"Fotografía  →  modelo OBJ  →  familia RFA");
+        top.Children.Add(phase);
+        var bottom=new Border {Background=Brushes.White,BorderBrush=BorderColor(),BorderThickness=new Thickness(1),Padding=new Thickness(10),Margin=new Thickness(0,8,0,0)};
+        DockPanel.SetDock(bottom,Dock.Bottom);root.Children.Add(bottom);
+        var feedback=new StackPanel();bottom.Child=feedback;
+        feedback.Children.Add(progressBar);feedback.Children.Add(status);feedback.Children.Add(traffic);
+        var scroll=new ScrollViewer {VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};root.Children.Add(scroll);
+        var content=new StackPanel {Margin=new Thickness(0,0,6,0)};scroll.Content=content;
 
-        var generation=Section(right,"1. Generar modelo 3D");
-        AddButton(generation,"Generar modelo 3D",()=>Run(GenerateAsync));
+        var photograph=Section(content,"01   Fotografía y configuración");
+        var photoGrid=new Grid();photoGrid.ColumnDefinitions.Add(new() {Width=new GridLength(185)});photoGrid.ColumnDefinitions.Add(new());photograph.Children.Add(photoGrid);
+        photoGrid.Children.Add(new Border {Background=Brushes.WhiteSmoke,Child=preview,MinHeight=140,Margin=new Thickness(0,0,12,0)});
+        var photoDetails=new StackPanel();Grid.SetColumn(photoDetails,1);photoGrid.Children.Add(photoDetails);
+        photoDetails.Children.Add(photoName);photoDetails.Children.Add(previewNotice);
+        AddButton(photoDetails,"Seleccionar fotografía JPG / PNG / WebP",()=>Run(SelectPhotoAsync),true,false);
+        Field(photograph,"Modo de trabajo",mode);photograph.Children.Add(modeNotice);
+        Label(photograph,"Meshy · Image to 3D · Meshy T2 / smart-topology · sin texturas · OBJ");
+        Field(photograph,"Polígonos objetivo (100–15000)",polycount);
+        Label(photograph,"Generación real nueva: costo estimado de 5 créditos API por tarea (tarifa verificada 16/11/2026; puede cambiar). La simulación usa un OBJ fijo y cuesta 0.");
+        Field(photograph,"Escenario de prueba (solo modo simulado)",scenario);
+
+        var generation=Section(content,"02   Generación y seguimiento");
+        generate=AddButton(generation,"Generar modelo 3D · nueva tarea",()=>Run(GenerateAsync),true,true);
+        Label(generation,"Solo una generación NUEVA en modo real puede consumir créditos. Se pedirá autorización explícita antes de enviarla.");
         stop=AddButton(generation,"Detener seguimiento local",()=>operationCancellation?.Cancel(),false);
-        Label(generation,"Detener o cerrar no cancela la tarea remota ni revierte un cargo ya producido. Conserve el ID para reanudar.");
-        Field(generation,"Escenario de prueba (solo simulado)",scenario);
-        var recovery=Section(right,"Historial y recuperación (no crea tareas)");
-        recovery.Children.Add(history);controls.Add(history);
-        AddButton(recovery,"Actualizar historial local",()=>Run(RefreshHistoryAsync));
-        Field(recovery,"ID conocido o recuperado en Meshy",taskId);
-        var row=new WrapPanel();recovery.Children.Add(row);
-        AddButton(row,"Consultar ID",()=>Run(QueryAsync));
-        AddButton(row,"Continuar / descargar OBJ",()=>Run(ResumeAsync));
+        Label(generation,"Detener o cerrar no cancela la tarea remota. Conserve su ID para reanudar sin crear otra generación.");
+        Label(generation,"Historial local y recuperación · sin nueva generación pagada");
+        generation.Children.Add(history);controls.Add(history);
+        AddButton(generation,"Actualizar historial",()=>Run(RefreshHistoryAsync));
+        Field(generation,"ID completo de tarea (seleccione un registro o péguelo)",taskId);
+        var row=new WrapPanel();generation.Children.Add(row);
+        query=AddButton(row,"Consultar estado",()=>Run(QueryAsync));
+        resume=AddButton(row,"Continuar / recuperar OBJ",()=>Run(ResumeAsync));
         AddButton(row,"Copiar ID",()=> {try {Clipboard.SetText(RequireId());}catch(Exception) {SetStatus("No se pudo copiar un ID válido al portapapeles.");}});
-        reconcile=AddButton(recovery,"Conciliar reserva incierta con este ID",()=>Run(ReconcileAsync));
-        retry=AddButton(recovery,"Reintentar rechazo corregido",()=>Run(token=>GenerateAsync(token,true)));
-        var output=Section(right,"2. Crear familia RFA desde el OBJ conservado");
-        Field(output,"OBJ local",objPath);
-        output.Children.Add(editMaterials);controls.Add(editMaterials);
-        Label(output,"Conservar original por defecto. La selección se abre en Revit y afecta solo al nuevo RFA; requiere un OBJ recuperado. No cambia el RFA anterior.");
-        createRfa=AddButton(output,"Crear familia RFA (requiere altura confirmada)",()=>Run(CreateRfaAsync,false));
+        var advanced=new Expander {Header="Opciones avanzadas · conciliación y reintento",Margin=new Thickness(0,8,0,0)};generation.Children.Add(advanced);
+        var advancedPanel=new StackPanel();advanced.Content=advancedPanel;
+        reconcile=AddButton(advancedPanel,"Conciliar reserva incierta con este ID · sin POST",()=>Run(ReconcileAsync));
+        retry=AddButton(advancedPanel,"Reintentar rechazo corregido · puede generar cargo",()=>Run(token=>GenerateAsync(token,true)));
+
+        var family=Section(content,"03   Preparación BIM · sin nueva generación pagada");
+        Field(family,"Nombre de la nueva familia (la simulación añade SIM_)",name);
+        Field(family,"Descripción (opcional)",description);
+        Field(family,"Altura física real confirmada (mm)",height);
+        Field(family,"Eje vertical ORIGINAL del archivo OBJ",axis);
+        Label(family,"Revit utiliza Z como eje vertical de destino. Algunos OBJ de Meshy pueden usar Y; compruebe su modelo. Si quedó acostado, cambie aquí el eje y cree otro RFA desde el mismo OBJ, sin generar otra malla ni consumir créditos.");
+        Field(family,"Archivo OBJ disponible",objPath);
+        family.Children.Add(editMaterials);controls.Add(editMaterials);
+        Label(family,"Al marcar, podrá conservar la apariencia original, aplicar RGB uniforme o copiar el color gráfico de un material. Afecta al nuevo RFA en Sombreado; Realista puede mostrar otra apariencia. No separa asiento, respaldo y patas.");
+
+        var output=Section(content,"04   Resultado · creación local de RFA");
+        createRfa=AddButton(output,"Crear familia RFA desde el OBJ disponible",()=>Run(CreateRfaAsync,false),true,true);
+        Label(output,"Confirme la altura en mm y el eje original. Crear o repetir el RFA reutiliza el OBJ y no inicia otra generación Meshy.");
         Field(output,"Último RFA creado",rfaPath);
         var locations=new WrapPanel();output.Children.Add(locations);
         openRfa=AddButton(locations,"Abrir RFA en Revit",()=>Run(OpenRfaAsync,false));
-        AddButton(locations,"Carpeta OBJ",()=>OpenFolder(result?.LocalPath));
-        AddButton(locations,"Carpeta RFA",()=>OpenFolder(lastRfa));
+        objFolder=AddButton(locations,"Abrir carpeta OBJ",()=>OpenFolder(result?.LocalPath));
+        rfaFolder=AddButton(locations,"Abrir carpeta RFA",()=>OpenFolder(lastRfa));
 
-        controls.Add(mode);
+        height.TextChanged+=(_,_)=>UpdateControls();name.TextChanged+=(_,_)=>UpdateControls();polycount.TextChanged+=(_,_)=>UpdateControls();
+        taskId.TextChanged+=(_,_)=>UpdateControls();
         history.SelectionChanged+=(_,_)=>
         {
             if(history.SelectedItem is HistoryItem item)
@@ -128,14 +145,18 @@ internal sealed class PhotoFamilyWindow : Window
     }
     private static StackPanel Section(Panel parent,string title)
     {
-        var panel=new StackPanel {Margin=new Thickness(9)};
-        parent.Children.Add(new GroupBox {Header=title,Content=panel,Margin=new Thickness(0,0,0,8)});return panel;
+        var panel=new StackPanel {Margin=new Thickness(14)};
+        parent.Children.Add(new GroupBox {Header=title,Content=panel,Background=Brushes.White,BorderBrush=BorderColor(),BorderThickness=new Thickness(1),Padding=new Thickness(0),Margin=new Thickness(0,0,0,10),FontWeight=FontWeights.SemiBold});
+        return panel;
     }
-    private static void Label(Panel panel,string text)=>panel.Children.Add(new TextBlock {Text=text,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,3,0,5)});
-    private void Field(Panel panel,string label,Control control) {Label(panel,label);panel.Children.Add(control);controls.Add(control);}
-    private Button AddButton(Panel panel,string text,Action action,bool track=true)
+    private static Brush Accent()=>new SolidColorBrush(System.Windows.Media.Color.FromRgb(21,64,105));
+    private static Brush BorderColor()=>new SolidColorBrush(System.Windows.Media.Color.FromRgb(210,218,226));
+    private static void Label(Panel panel,string text)=>panel.Children.Add(new TextBlock {Text=text,TextWrapping=TextWrapping.Wrap,FontWeight=FontWeights.Normal,Margin=new Thickness(0,5,0,5)});
+    private void Field(Panel panel,string label,Control control) {Label(panel,label);control.FontWeight=FontWeights.Normal;control.MinHeight=28;panel.Children.Add(control);controls.Add(control);}
+    private Button AddButton(Panel panel,string text,Action action,bool track=true,bool primary=false)
     {
-        var button=new Button {Content=text,Padding=new Thickness(8,4,8,4),Margin=new Thickness(0,4,5,2)};
+        var button=new Button {Content=text,Padding=new Thickness(12,7,12,7),Margin=new Thickness(0,5,7,3),MinHeight=33,FontWeight=primary?FontWeights.SemiBold:FontWeights.Normal,HorizontalAlignment=primary?HorizontalAlignment.Stretch:HorizontalAlignment.Left};
+        if(primary){button.Background=Accent();button.Foreground=Brushes.White;button.BorderBrush=Accent();}
         button.Click+=(_,_)=>action();panel.Children.Add(button);if(track)controls.Add(button);return button;
     }
     private void ChangeMode()
@@ -261,12 +282,14 @@ internal sealed class PhotoFamilyWindow : Window
     private bool Confirm(string title,string text,string accept)
     {
         bool accepted=false;
-        var dialog=new Window {Title=title,Owner=this,Width=560,SizeToContent=SizeToContent.Height,MaxHeight=650,WindowStartupLocation=WindowStartupLocation.CenterOwner,ResizeMode=ResizeMode.NoResize};
-        confirmation=dialog;var panel=new StackPanel {Margin=new Thickness(18)};dialog.Content=panel;
-        Label(panel,text);var cancel=new Button {Content="Cancelar",IsCancel=true,IsDefault=true,Padding=new Thickness(8),Margin=new Thickness(0,8,0,4)};
-        cancel.Click+=(_,_)=>dialog.Close();panel.Children.Add(cancel);
+        var dialog=new Window {Title=title,Owner=this,Width=Math.Min(560,SystemParameters.WorkArea.Width*0.9),Height=Math.Min(500,SystemParameters.WorkArea.Height*0.85),MinHeight=300,WindowStartupLocation=WindowStartupLocation.CenterOwner,ResizeMode=ResizeMode.CanResize};
+        confirmation=dialog;var root=new DockPanel {Margin=new Thickness(18)};dialog.Content=root;
+        var footer=new StackPanel();DockPanel.SetDock(footer,Dock.Bottom);root.Children.Add(footer);
+        var cancel=new Button {Content="Cancelar",IsCancel=true,IsDefault=true,Padding=new Thickness(8),Margin=new Thickness(0,8,0,4)};
+        cancel.Click+=(_,_)=>dialog.Close();footer.Children.Add(cancel);
         var allow=new Button {Content=accept,Padding=new Thickness(8),Margin=new Thickness(0,4,0,0)};
-        allow.Click+=(_,_)=> {accepted=true;dialog.Close();};panel.Children.Add(allow);
+        allow.Click+=(_,_)=> {accepted=true;dialog.Close();};footer.Children.Add(allow);
+        root.Children.Add(new ScrollViewer {VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Content=new TextBlock {Text=text,TextWrapping=TextWrapping.Wrap}});
         dialog.Loaded+=(_,_)=>cancel.Focus();dialog.ShowDialog();confirmation=null;return accepted;
     }
     private string RequireId()
@@ -291,6 +314,7 @@ internal sealed class PhotoFamilyWindow : Window
     {
         result=null;lastRfa=null;objPath.Text="";rfaPath.Text="";
         if(resetHeight)height.Text="";
+        if(!closed)UpdateControls();
     }
     private async Task ReconcileAsync(CancellationToken token)
     {
@@ -324,10 +348,29 @@ internal sealed class PhotoFamilyWindow : Window
     private void UpdateControls()
     {
         foreach(var control in controls)control.IsEnabled=!busy;
-        createRfa.IsEnabled=!busy && result is not null;openRfa.IsEnabled=!busy && lastRfa is not null;
-        reconcile.IsEnabled=!busy && history.SelectedItem is HistoryItem {Record.Submission:SubmissionState.Uncertain,Record.TaskId:null};
+        bool validPhoto=photoPath is not null && File.Exists(photoPath);
+        bool validOptions=int.TryParse(polycount.Text,out int count) && count>=100 && count<=15000;
+        bool validHeight=(double.TryParse(height.Text,NumberStyles.Float,CultureInfo.CurrentCulture,out double mm) ||
+            double.TryParse(height.Text,NumberStyles.Float,CultureInfo.InvariantCulture,out mm)) && double.IsFinite(mm) && mm>0;
+        bool validName=true;
+        try {ObjInspection.ValidateName(name.Text.Trim());}catch(ArgumentException) {validName=false;}
+        bool validId=Guid.TryParseExact(taskId.Text.Trim(),"D",out _);
+        generate.IsEnabled=!busy && validPhoto && validOptions && (IsSimulated || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MESHY_API_KEY")));
+        query.IsEnabled=!busy && validId;
+        resume.IsEnabled=!busy && validId;
+        createRfa.IsEnabled=!busy && result is not null && File.Exists(result.LocalPath) && validHeight && validName;
+        openRfa.IsEnabled=!busy && lastRfa is not null && File.Exists(lastRfa);
+        objFolder.IsEnabled=!busy && result is not null && File.Exists(result.LocalPath);
+        rfaFolder.IsEnabled=!busy && lastRfa is not null && File.Exists(lastRfa);
+        reconcile.IsEnabled=!busy && validId && history.SelectedItem is HistoryItem {Record.Submission:SubmissionState.Uncertain,Record.TaskId:null};
         retry.IsEnabled=!busy && history.SelectedItem is HistoryItem {Record.Submission:SubmissionState.Rejected} item &&
+            validPhoto && validOptions && (IsSimulated || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MESHY_API_KEY"))) &&
             (item.Record.RetryNotBefore is null || item.Record.RetryNotBefore<=DateTimeOffset.UtcNow);
+        phase.Text=lastRfa is not null && File.Exists(lastRfa)?"● Fase 4 de 4 · RFA generado":
+            result is not null? validHeight && validName?"● Fase 3 de 4 · OBJ listo; datos BIM completos":"● Fase 3 de 4 · OBJ listo; complete nombre y altura en mm":
+            busy?"● Fase 2 de 4 · operación en curso":
+            validPhoto?"● Fase 1 de 4 · fotografía validada; puede generar o recuperar un OBJ":"● Fase 1 de 4 · seleccione una fotografía o recupere una tarea existente";
+        phase.Foreground=Accent();
         traffic.Text=simulation is null?"Modo real: consultar/reutilizar no autoriza una nueva generación.":$"Solo transporte simulado · POST: {simulation.CreationRequests} · GET estado: {simulation.StatusRequests} · descargas: {simulation.Downloads} · créditos: 0";
     }
     private void SetStatus(string text) {if(!closed)status.Text=text;}
