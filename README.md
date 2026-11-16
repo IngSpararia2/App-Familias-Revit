@@ -1,4 +1,16 @@
-# BIM Family AI — Etapa 3A
+# BIM Family AI — Etapa 3B
+
+Nuevo comando: **Complementos → Herramientas externas → BIM Family AI — Importar OBJ como familia**. Seleccione un OBJ local, sus unidades y eje vertical; opcionalmente indique altura objetivo en mm y confirme el nombre. La escala es uniforme y el resultado queda centrado en X/Y, con base Z=0, en Documentos/BIM Family AI/Generated. Ancho, Profundidad y Altura del OBJ son **informativos**, no controlan la malla.
+
+Consulte [stage3b-validation.md](docs/stage3b-validation.md) para límites, materiales, pruebas y resultados reales. Se mantienen los dos generadores previos. Instale los tres con el mismo script de abajo.
+
+Pruebas del lector, sin dependencias de testing ni Autodesk:
+
+```powershell
+dotnet run --project .\tests\BimFamilyAI.Core.Checks -- tests/fixtures
+```
+
+Para probar el importador en Revit use `tests/fixtures/cube_500mm.obj` en milímetros o `offset_prism_m.obj` en metros, Z vertical. El segundo debe medir 1000 × 600 × 750 mm; con altura objetivo 1500 mm debe medir 2000 × 1200 × 1500 mm. Los RFA generados ya se comprobaron en Revit. Para importar modelos propios no necesita ejecutar las pruebas: seleccione el tercer comando y confirme las unidades de su archivo.
 
 Se añade **BIM Family AI — Generar familia paramétrica** a Herramientas externas, junto al generador fijo original. Crea `BIMFamilyAI_ParametricBox.rfa` con una sola extrusión, parámetros de tipo **Ancho, Profundidad, Altura y Material**, y tipos **Cubo_500** y **Prisma_1000x600x750**. Cambie estos valores desde **Crear → Propiedades → Tipos de familia**, aplique y observe la geometría sin ejecutar de nuevo el complemento.
 

@@ -1,5 +1,9 @@
 # Arquitectura mínima
 
+## Etapa 3B
+
+Core añade ObjImportRequest y ObjInspection, sin Autodesk: selección de unidades/eje y lectura estructural limitada del OBJ. ImportObjFamilyCommand recoge opciones; ObjFamilyImporter realiza importación nativa, transformación, datos BIM y validación. FamilyFileWorkflow contiene el ciclo de plantilla y guardado antes incluido en GenerateTestFamilyCommand; los tres comandos lo reutilizan. La futura entrada Meshy podrá proporcionar un archivo y ObjImportRequest al mismo importador. No se implementan servicios IA en esta etapa.
+
 ## Etapa 3A
 
 GenerateParametricFamilyCommand delega el ciclo de documento/plantilla/guardado al flujo existente de GenerateTestFamilyCommand, conservando el generador fijo. ParametricBoxBuilder concentra las restricciones y validación de una única extrusión: planos, cotas de semidimensiones con fórmulas, altura y material asociados. No añade dependencias ni lógica Autodesk a Core. El archivo temporal se reabre y se valida antes de entregar el RFA final. Ver stage3a-validation.md para resultados y pendientes.

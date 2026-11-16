@@ -47,6 +47,15 @@ $assembly = [System.Security.SecurityElement]::Escape((Join-Path $deployment 'Bi
     <VendorDescription>BIM Family AI</VendorDescription>
     <Description>Prisma con dimensiones y material de tipo editables.</Description>
   </AddIn>
+  <AddIn Type="Command">
+    <Assembly>$assembly</Assembly>
+    <AddInId>46F40841-7C37-4705-96D1-EE848D8762FB</AddInId>
+    <FullClassName>BimFamilyAI.Revit.ImportObjFamilyCommand</FullClassName>
+    <Text>BIM Family AI — Importar OBJ como familia</Text>
+    <VendorId>BFAI</VendorId>
+    <VendorDescription>BIM Family AI</VendorDescription>
+    <Description>Importación OBJ nativa con unidades, escala y posición verificadas.</Description>
+  </AddIn>
 </RevitAddIns>
 "@
 $manifest.Save($manifestPath)

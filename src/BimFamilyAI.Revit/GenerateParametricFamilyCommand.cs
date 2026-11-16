@@ -8,5 +8,5 @@ namespace BimFamilyAI.Revit;
 public sealed class GenerateParametricFamilyCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        => GenerateTestFamilyCommand.ExecuteFamily(commandData, ref message, true);
+        => FamilyFileWorkflow.ExecuteFamily(commandData, ref message, true);
 }
