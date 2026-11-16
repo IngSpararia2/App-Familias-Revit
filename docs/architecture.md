@@ -24,14 +24,20 @@ La primera modalidad será una familia geométrica basada en geometría 3D impor
 - Aplicación local, sin backend ni base de datos.
 - Solo se crean Core y el límite Revit; no hay proyectos vacíos para UI o proveedores.
 - Las referencias API se resuelven centralmente mediante `RevitInstallDir` o `REVIT_2027_DIR` y no se copian al directorio de salida.
-- No se añaden paquetes NuGet, credenciales, comandos Revit ni manifiestos `.addin`.
+- No se añaden paquetes NuGet ni credenciales. En etapa 2 se incorpora `GenerateTestFamilyCommand` y el script genera el manifiesto local sin rutas versionadas.
 
 ## Entorno detectado en esta máquina
 
 - Windows 11 x64 (build 26300).
-- .NET SDK instalado: 11.0.100; runtimes .NET 10.0.15 y .NET 11.0.0. No está instalado el SDK 10.0.100 que Autodesk indica para crear complementos Revit 2027. No se instaló software durante esta etapa.
+- SDK detectados en etapa 2: 10.0.404 y 11.0.100. `global.json` selecciona .NET 10 estable con rollForward latestFeature desde 10.0.100. No se instaló software durante esta ejecución.
 - Revit 2027 presente en `C:\Program Files\Autodesk\Revit 2027`; `RevitAPI.dll` y `RevitAPIUI.dll` disponibles.
 - Git 2.55.0.windows.4 disponible. No se encontró `msbuild` como comando independiente; el SDK de .NET incluye MSBuild.
-- Carpeta inicial vacía, sin proyecto ni repositorio Git.
+- En etapa 1 la carpeta estaba vacía; en etapa 2 existe repositorio Git con origin IngSpararia2/App-Familias-Revit y rama main inicialmente limpia.
+
+## Etapa 2
+
+El comando crea un documento independiente, comprueba Modelo genérico, convierte milímetros mediante UnitUtils y crea una extrusión sobre Z=0. Comprueba su caja geométrica antes de confirmar la transacción. SaveAs ocurre después de Commit. El guardado usa una carpeta temporal propia y un movimiento final sin sobrescritura; el documento se cierra y la carpeta temporal se limpia incluso ante errores, comunicando cualquier fallo de limpieza.
+
+Se habilita WPF solamente para el selector estándar de archivos RFT, sin interfaz propia. La ejecución y apertura de RFA requieren comprobación dentro de Revit. Ver README para el procedimiento completo.
 
 Revisar los requisitos actuales en la [guía oficial de migración a .NET 10 para Revit 2027](https://help.autodesk.com/cloudhelp/2027/ENU/Revit-WhatsNew/files/GUID-8D7A4715-EAF8-4BD1-BE78-061F900D0BCE.htm).

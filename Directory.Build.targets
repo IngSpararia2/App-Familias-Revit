@@ -14,4 +14,7 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="ValidateRevitApi" BeforeTargets="ResolveReferences" Condition="'$(MSBuildProjectName)' == 'BimFamilyAI.Revit'">
+    <Error Condition="!Exists('$(RevitInstallDir)\RevitAPI.dll') or !Exists('$(RevitInstallDir)\RevitAPIUI.dll')" Text="Faltan las API de Revit 2027. Configure RevitInstallDir o REVIT_2027_DIR con la instalación de Revit 2027." />
+  </Target>
 </Project>
