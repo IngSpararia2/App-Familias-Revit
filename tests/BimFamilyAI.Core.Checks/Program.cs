@@ -1,4 +1,11 @@
 using BimFamilyAI.Core;
+using System.Text.Json;
+
+if (args.Length == 2 && args[0] == "--analyze")
+{
+    Console.WriteLine(JsonSerializer.Serialize(ObjStructure.Analyze(args[1]), new JsonSerializerOptions { WriteIndented = true }));
+    return;
+}
 
 var fixtures = Path.GetFullPath(args.Length > 0 ? args[0] : "tests/fixtures");
 int passed = 0;
@@ -31,6 +38,7 @@ try
     var negative = Path.Combine(directory, "negative.obj");
     File.WriteAllText(negative, "v 0 0 0\nv 2 0 0\nv 0 3 4\nf -3 -2 -1");
     Check(ObjInspection.Inspect(negative) == new ObjBounds(2,3,4), "negative indices");
+    passed += ObjStructureChecks.Run(fixtures, directory);
     Console.WriteLine($"{passed} checks passed");
 }
 finally { Directory.Delete(directory, true); }
