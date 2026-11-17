@@ -29,6 +29,7 @@ internal static class FamilyFileWorkflow
         var errors = new List<string>();
         var result = Result.Failed;
         ImportedMaterialDialog.Choice? materialChoice = null;
+        IReadOnlyList<ImportedMaterials.SavedMaterial>? multipleExpected = null;
         try
         {
             var template = SelectTemplate(app.FamilyTemplatePath);
@@ -47,10 +48,24 @@ internal static class FamilyFileWorkflow
                 ObjFamilyImporter.Import(family, obj);
                 if (editMaterials)
                 {
-                    var dialog = new ImportedMaterialDialog(family, obj.FamilyName);
+                    var dialog = new ImportedMaterialDialog(family, obj.FamilyName, originalMaterials);
                     if (dialog.ShowDialog() != true) return new(Result.Cancelled,null,"Creación cancelada; OBJ conservado.");
                     materialChoice = dialog.Selected;
                     if (materialChoice is { } m) ImportedMaterials.Apply(family,m.Name,m.Red,m.Green,m.Blue,originalMaterials,obj);
+                    if (dialog.MultipleSelected is { } assignments)
+                    {
+                        var edited=assignments.Select(a=>a.Id).ToHashSet();
+                        var untouched=ImportedMaterials.EditableMaterials(family).Where(m=>!edited.Contains(m.Id))
+                            .ToDictionary(m=>m.Id,m=>{var material=(Material)family.GetElement(m.Id);return (m.Red,m.Green,m.Blue,material.Transparency,material.UseRenderAppearanceForShading,m.References);});
+                        ImportedMaterials.ApplyMultiple(family,assignments,originalMaterials);
+                        multipleExpected=ImportedMaterials.Snapshot(family);
+                        if(ImportedMaterials.EditableMaterials(family).Where(m=>untouched.ContainsKey(m.Id)).Any(m=>
+                        {
+                            var old=untouched[m.Id];var material=(Material)family.GetElement(m.Id);
+                            return m.Red!=old.Red || m.Green!=old.Green || m.Blue!=old.Blue || material.Transparency!=old.Transparency || material.UseRenderAppearanceForShading!=old.UseRenderAppearanceForShading || m.References!=old.References;
+                        }))
+                            throw new InvalidOperationException("Un material no seleccionado cambió durante la edición.");
+                    }
                     ObjFamilyImporter.ValidateSaved(family,obj);
                 }
             }
@@ -101,6 +116,7 @@ internal static class FamilyFileWorkflow
                 if (obj is not null) ObjFamilyImporter.ValidateSaved(family, obj);
                 else ParametricBoxBuilder.ValidateSaved(family);
                 if (materialChoice is { } m) ImportedMaterials.Validate(family,m.Red,m.Green,m.Blue);
+                if (multipleExpected is not null) ImportedMaterials.ValidateSnapshot(family,multipleExpected);
                 if (!family.Close(false)) throw new IOException("No se pudo cerrar la familia reabierta.");
                 family = null;
             }

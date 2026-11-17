@@ -6,6 +6,9 @@ namespace BimFamilyAI.Revit;
 internal static class ImportedMaterials
 {
     internal sealed record Region(ElementId MaterialId, ElementId CategoryId);
+    internal sealed record Editable(ElementId Id,string Name,byte Red,byte Green,byte Blue,int References);
+    internal sealed record Assignment(ElementId Id,string OriginalName,byte Red,byte Green,byte Blue);
+    internal sealed record SavedMaterial(string Name,byte Red,byte Green,byte Blue,int Transparency,bool RenderShading,int References);
     internal static IReadOnlyList<Region> Inspect(Document doc)
     {
         var imports=new FilteredElementCollector(doc).OfClass(typeof(ImportInstance)).Cast<ImportInstance>().ToArray();
@@ -23,6 +26,69 @@ internal static class ImportedMaterials
         }
         Walk(imports[0].get_Geometry(new Options {DetailLevel=ViewDetailLevel.Fine}));
         return regions.ToArray();
+    }
+    internal static IReadOnlyList<Editable> EditableMaterials(Document doc)
+    {
+        return Inspect(doc).GroupBy(r=>r.MaterialId).Select(group=>
+        {
+            var material=doc.GetElement(group.Key) as Material;
+            return material is null?null:new Editable(group.Key,material.Name,material.Color.Red,material.Color.Green,material.Color.Blue,group.Count());
+        }).Where(item=>item is not null).Cast<Editable>().OrderBy(item=>item.Name,StringComparer.Ordinal).ToArray();
+    }
+    internal static IReadOnlyList<SavedMaterial> Snapshot(Document doc)
+    {
+        var regions=Inspect(doc);
+        if(regions.Count==0)throw new InvalidOperationException("La importación no contiene regiones materiales verificables.");
+        return regions.GroupBy(r=>r.MaterialId).Select(group=>
+        {
+            if(doc.GetElement(group.Key) is not Material m)throw new InvalidOperationException("La referencia material desapareció.");
+            return new SavedMaterial(m.Name,m.Color.Red,m.Color.Green,m.Color.Blue,m.Transparency,m.UseRenderAppearanceForShading,group.Count());
+        }).OrderBy(item=>item.Name,StringComparer.Ordinal).ToArray();
+    }
+    internal static void ValidateSnapshot(Document doc,IReadOnlyList<SavedMaterial> expected)
+    {
+        var actual=Snapshot(doc);
+        if(actual.Count!=expected.Count || !actual.SequenceEqual(expected))
+            throw new InvalidOperationException("Los materiales o sus referencias cambiaron al guardar y reabrir la familia.");
+    }
+    internal static void ApplyMultiple(Document doc,IReadOnlyList<Assignment> assignments,IReadOnlySet<ElementId> originalMaterials)
+    {
+        var editable=EditableMaterials(doc);
+        if(editable.Count<2)throw new InvalidOperationException("El OBJ no contiene dos materiales explícitos independientes.");
+        if(editable.Any(m=>originalMaterials.Contains(m.Id)))throw new InvalidOperationException("La importación comparte un material de plantilla; no se modificarán sus referencias.");
+        if(assignments.Count==0)throw new InvalidOperationException("Seleccione al menos un material para editar.");
+        if(assignments.Select(a=>a.Id).Distinct().Count()!=assignments.Count)throw new InvalidOperationException("Un material fue seleccionado dos veces.");
+        foreach(var selected in assignments)
+        {
+            var current=editable.SingleOrDefault(m=>m.Id==selected.Id);
+            if(current is null || current.Name!=selected.OriginalName)throw new InvalidOperationException("La referencia de material cambió antes de aplicar colores.");
+            if(originalMaterials.Contains(selected.Id))throw new InvalidOperationException("El material pertenece a la plantilla y no se modificará.");
+        }
+        using var transaction=new Transaction(doc,"Colores independientes de OBJ");
+        if(transaction.Start()!=TransactionStatus.Started)throw new InvalidOperationException("No se pudo iniciar la edición de materiales.");
+        int index=0;
+        foreach(var item in editable)
+        {
+            var material=(Material)doc.GetElement(item.Id);
+            // Revit merges imported materials with the same name when families meet in one RVT.
+            string suffix=item.Name[..Math.Min(item.Name.Length,30)];
+            string isolated=$"BFAI_Region{++index}_{suffix}_{Guid.NewGuid():N}";
+            if(!Material.IsNameUnique(doc,isolated))throw new InvalidOperationException("No se pudo aislar el nombre de un material importado.");
+            material.Name=isolated;
+            var selected=assignments.SingleOrDefault(a=>a.Id==item.Id);
+            if(selected is null)continue; // Keep untouched material shading, RGB and transparency.
+            material.UseRenderAppearanceForShading=false;
+            material.Color=new Color(selected.Red,selected.Green,selected.Blue);
+            material.Transparency=0;
+        }
+        doc.Regenerate();
+        foreach(var selected in assignments)
+        {
+            var m=(Material)doc.GetElement(selected.Id);
+            if(m.Color.Red!=selected.Red || m.Color.Green!=selected.Green || m.Color.Blue!=selected.Blue || m.UseRenderAppearanceForShading || m.Transparency!=0)
+                throw new InvalidOperationException("Revit no aplicó un color seleccionado.");
+        }
+        if(transaction.Commit()!=TransactionStatus.Committed)throw new InvalidOperationException("Revit no confirmó los materiales independientes.");
     }
     internal static void Apply(Document doc, string name, byte red, byte green, byte blue, IReadOnlySet<ElementId> originalMaterials, BimFamilyAI.Core.ObjImportRequest? request = null)
     {

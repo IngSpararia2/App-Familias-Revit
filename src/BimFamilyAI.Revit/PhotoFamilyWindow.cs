@@ -108,7 +108,7 @@ internal sealed class PhotoFamilyWindow : Window
         Label(family,"Revit utiliza Z como eje vertical de destino. Algunos OBJ de Meshy pueden usar Y; compruebe su modelo. Si quedó acostado, cambie aquí el eje y cree otro RFA desde el mismo OBJ, sin generar otra malla ni consumir créditos.");
         Field(family,"Archivo OBJ disponible",objPath);
         family.Children.Add(editMaterials);controls.Add(editMaterials);
-        Label(family,"Al marcar, podrá conservar la apariencia original, aplicar RGB uniforme o copiar el color gráfico de un material. Afecta al nuevo RFA en Sombreado; Realista puede mostrar otra apariencia. No separa asiento, respaldo y patas.");
+        Label(family,"Al marcar, podrá conservar la apariencia original, aplicar RGB uniforme, copiar un color gráfico o editar materiales independientes si el OBJ los expone. Afecta al nuevo RFA en Sombreado; Realista puede mostrar otra apariencia. No separa asiento, respaldo y patas.");
 
         var output=Section(content,"04   Resultado · creación local de RFA");
         createRfa=AddButton(output,"Crear familia RFA desde el OBJ disponible",()=>Run(CreateRfaAsync,false),true,true);
