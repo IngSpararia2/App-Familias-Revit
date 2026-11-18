@@ -21,7 +21,8 @@ internal static class FamilyFileWorkflow
 
     // Must be called exclusively from a valid Revit command or ExternalEvent.Execute context.
     internal static FamilyWorkflowOutcome CreateFamily(Autodesk.Revit.ApplicationServices.Application app,
-        bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null, bool editMaterials = false)
+        bool parametric, BimFamilyAI.Core.ObjImportRequest? obj = null, bool editMaterials = false,
+        ObjAssemblyRequest? assembly = null)
     {
         Document? family = null;
         string? staging = null;
@@ -45,8 +46,13 @@ internal static class FamilyFileWorkflow
             if (obj is not null)
             {
                 var originalMaterials = new FilteredElementCollector(family).OfClass(typeof(Material)).ToElementIds().ToHashSet();
-                ObjFamilyImporter.Import(family, obj);
-                if (editMaterials)
+                if (assembly is not null)
+                {
+                    if (editMaterials) throw new InvalidOperationException("Use los colores por componente en esta modalidad.");
+                    ObjAssemblyImporter.Import(family, obj, assembly, originalMaterials);
+                }
+                else ObjFamilyImporter.Import(family, obj);
+                if (editMaterials && assembly is null)
                 {
                     var dialog = new ImportedMaterialDialog(family, obj.FamilyName, originalMaterials);
                     if (dialog.ShowDialog() != true) return new(Result.Cancelled,null,"Creación cancelada; OBJ conservado.");
@@ -113,7 +119,8 @@ internal static class FamilyFileWorkflow
             if (parametric || obj is not null)
             {
                 family = app.OpenDocumentFile(temporary);
-                if (obj is not null) ObjFamilyImporter.ValidateSaved(family, obj);
+                if (obj is not null && assembly is not null) ObjAssemblyImporter.ValidateSaved(family, obj, assembly);
+                else if (obj is not null) ObjFamilyImporter.ValidateSaved(family, obj);
                 else ParametricBoxBuilder.ValidateSaved(family);
                 if (materialChoice is { } m) ImportedMaterials.Validate(family,m.Red,m.Green,m.Blue);
                 if (multipleExpected is not null) ImportedMaterials.ValidateSnapshot(family,multipleExpected);

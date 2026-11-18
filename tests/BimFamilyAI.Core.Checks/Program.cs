@@ -54,6 +54,7 @@ try
     Check(ObjInspection.Inspect(negative) == new ObjBounds(2,3,4), "negative indices");
     passed += ObjStructureChecks.Run(fixtures, directory);
     passed += ObjExtractionChecks.Run(fixtures, directory);
+    passed += ObjAssemblyChecks.Run(fixtures, directory);
     Console.WriteLine($"{passed} checks passed");
 }
 finally { Directory.Delete(directory, true); }

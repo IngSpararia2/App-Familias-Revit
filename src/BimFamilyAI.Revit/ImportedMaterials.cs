@@ -13,6 +13,10 @@ internal static class ImportedMaterials
     {
         var imports=new FilteredElementCollector(doc).OfClass(typeof(ImportInstance)).Cast<ImportInstance>().ToArray();
         if(imports.Length!=1)throw new InvalidOperationException("Se requiere una única importación OBJ en la familia nueva.");
+        return InspectElement(doc,imports[0]);
+    }
+    internal static IReadOnlyList<Region> InspectElement(Document doc,ImportInstance imported)
+    {
         var regions=new HashSet<Region>();
         void Walk(GeometryElement geometry)
         {
@@ -24,7 +28,7 @@ internal static class ImportedMaterials
                 if(item is Solid solid)foreach(Face face in solid.Faces)regions.Add(new(face.MaterialElementId,category?.Id ?? ElementId.InvalidElementId));
             }
         }
-        Walk(imports[0].get_Geometry(new Options {DetailLevel=ViewDetailLevel.Fine}));
+        Walk(imported.get_Geometry(new Options {DetailLevel=ViewDetailLevel.Fine}));
         return regions.ToArray();
     }
     internal static IReadOnlyList<Editable> EditableMaterials(Document doc)

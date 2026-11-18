@@ -30,6 +30,69 @@ public static class ObjComponentExtractor
         internal readonly HashSet<string> Materials = new(StringComparer.Ordinal);
     }
 
+    /// <summary>Rechecks a published extraction immediately before a consumer uses it.</summary>
+    public static ObjExtractionManifest Verify(string sourcePath, string extractionDirectory)
+    {
+        string source = Path.GetFullPath(sourcePath);
+        string directory = Path.GetFullPath(extractionDirectory);
+        string manifestPath = Path.Combine(directory, "manifest.json");
+        if (new FileInfo(manifestPath).Length > ObjInspection.MaxBytes)
+            throw new IOException("Manifiesto demasiado grande.");
+        ObjExtractionManifest manifest;
+        try { manifest = JsonSerializer.Deserialize<ObjExtractionManifest>(File.ReadAllText(manifestPath))
+            ?? throw new IOException("Manifiesto de componentes vacío."); }
+        catch (JsonException ex) { throw new IOException("Manifiesto de componentes inválido.", ex); }
+        var topology = ObjStructure.AnalyzeWithFaces(source);
+        if (manifest.FormatVersion != 1 || manifest.SourceSha256 != Hash(source) ||
+            manifest.ComponentCount != topology.Structure.Components.Count ||
+            manifest.Components is null || manifest.Components.Count != manifest.ComponentCount ||
+            manifest.AuxiliaryFiles is null || manifest.GlobalBox != GlobalBox(topology.Structure.Components.Select(c => c.Box)))
+            throw new IOException("El manifiesto no corresponde al OBJ original.");
+        Document original;
+        try { original = Parse(source); }
+        catch (DecoderFallbackException ex) { throw new IOException("El OBJ no contiene texto UTF-8 válido.", ex); }
+        if (original.Faces.Count != topology.FaceComponents.Count)
+            throw new IOException("El OBJ cambió durante la validación.");
+        IReadOnlyList<string> expectedLibraries = original.Materials.Count == 0 ? [] : original.Libraries;
+        if (manifest.AuxiliaryFiles.Count != expectedLibraries.Count)
+            throw new IOException("Faltan bibliotecas MTL requeridas.");
+        for (int i = 0; i < expectedLibraries.Count; i++)
+        {
+            var asset = manifest.AuxiliaryFiles[i];
+            if (asset is null || asset.FileName != expectedLibraries[i] || !SafeLeaf(asset.FileName))
+                throw new IOException("Referencia MTL inválida en el manifiesto.");
+            string path = Path.Combine(directory, asset.FileName);
+            if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 ||
+                new FileInfo(path).Length != asset.Bytes || Hash(path) != asset.Sha256)
+                throw new IOException($"MTL alterado o ausente: {asset.FileName}.");
+        }
+        for (int i = 0; i < manifest.Components.Count; i++)
+        {
+            var component = topology.Structure.Components[i];
+            var piece = manifest.Components[i];
+            string id = $"component_{i + 1:000}";
+            if (piece is null || piece.Id != id || piece.FileName != id + ".obj" ||
+                piece.Box != component.Box || piece.Faces != component.Faces || piece.Triangles != component.Triangles)
+                throw new IOException($"Metadatos inconsistentes para {id}.");
+            string path = Path.Combine(directory, piece.FileName);
+            if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 || Hash(path) != piece.Sha256)
+                throw new IOException($"OBJ alterado o ausente: {id}.");
+            int[] faceNumbers = Enumerable.Range(0, original.Faces.Count)
+                .Where(n => topology.FaceComponents[n] == component.Number).ToArray();
+            var sourceFaces = faceNumbers.Select(n => original.Faces[n]).ToArray();
+            int[] positions = sourceFaces.SelectMany(f => f.Corners.Select(c => c.Position)).Distinct().Order().ToArray();
+            int[] textures = sourceFaces.SelectMany(f => f.Corners.Where(c => c.Texture.HasValue).Select(c => c.Texture!.Value)).Distinct().Order().ToArray();
+            int[] normals = sourceFaces.SelectMany(f => f.Corners.Where(c => c.Normal.HasValue).Select(c => c.Normal!.Value)).Distinct().Order().ToArray();
+            if (piece.OriginalFaceNumbers is null || !piece.OriginalFaceNumbers.SequenceEqual(faceNumbers.Select(n => n + 1)) ||
+                piece.OriginalVertexNumbers is null || !piece.OriginalVertexNumbers.SequenceEqual(positions.Select(n => n + 1)) ||
+                piece.Vertices != positions.Length || piece.TextureVertices != textures.Length || piece.Normals != normals.Length)
+                throw new IOException($"Correspondencia original inválida: {id}.");
+            ValidatePiece(path, original, sourceFaces, positions, textures, normals, component);
+        }
+        if (manifest.SourceSha256 != Hash(source)) throw new IOException("El OBJ cambió durante la validación.");
+        return manifest;
+    }
+
     public static ObjExtractionResult Extract(string sourcePath, string outputDirectory)
     {
         var source = Path.GetFullPath(sourcePath);

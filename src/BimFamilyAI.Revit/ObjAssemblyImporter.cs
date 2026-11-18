@@ -1,0 +1,210 @@
+using System.IO;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.ExtensibleStorage;
+using BimFamilyAI.Core;
+
+namespace BimFamilyAI.Revit;
+
+internal sealed record ComponentColor(int Number, byte Red, byte Green, byte Blue);
+internal sealed record ObjAssemblyRequest(string ExtractionDirectory, IReadOnlyList<ComponentColor> Colors);
+
+/// <summary>Imports all extracted pieces in one family coordinate system, exclusively in Revit API context.</summary>
+internal static class ObjAssemblyImporter
+{
+    private static readonly Guid SchemaId = new("45ca17db-d2e5-4c44-9981-2c824f842dd3");
+
+    internal static void Import(Document doc, ObjImportRequest request, ObjAssemblyRequest assembly,
+        IReadOnlySet<ElementId> templateMaterials)
+    {
+        if (!OptionalFunctionalityUtils.IsOBJImportLinkAvailable())
+            throw new InvalidOperationException("La instalación de Revit no dispone del módulo OBJ.");
+        ObjInspection.ValidateName(request.FamilyName);
+        var manifest = ObjComponentExtractor.Verify(request.Path, assembly.ExtractionDirectory);
+        if (manifest.ComponentCount < 2)
+            throw new InvalidOperationException("El OBJ tiene una sola componente; use OBJ completo.");
+        if (manifest.ComponentCount > 128)
+            throw new InvalidOperationException("Más de 128 componentes: revise el modelo antes de importar en Revit.");
+        if (assembly.Colors.Select(c => c.Number).Distinct().Count() != assembly.Colors.Count ||
+            assembly.Colors.Any(c => c.Number < 1 || c.Number > manifest.ComponentCount))
+            throw new InvalidOperationException("Asignación de color a componentes inválida.");
+        var pose = Pose(request, manifest.GlobalBox);
+        using var transaction = new Transaction(doc, "Importar componentes OBJ");
+        if (transaction.Start() != TransactionStatus.Started)
+            throw new InvalidOperationException("No se pudo iniciar la importación de componentes.");
+        var view = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+            .First(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan);
+        var schema = ComponentSchema();
+        var usedMaterials = new HashSet<ElementId>();
+        foreach (var piece in manifest.Components)
+        {
+            int number = int.Parse(piece.Id["component_".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            var color = assembly.Colors.SingleOrDefault(c => c.Number == number);
+            string path = Path.Combine(assembly.ExtractionDirectory, piece.FileName);
+            using var prepared = color is null ? null : UniformObjMaterial.Prepare(path, color.Red, color.Green, color.Blue);
+            string importPath = prepared?.Path ?? path;
+            using var options = new OBJImportOptions
+            {
+                Unit = ImportUnit.Millimeter,
+                CustomScale = pose.MillimetersPerSourceUnit,
+                Placement = ImportPlacement.Origin, ThisViewOnly = false, OrientToView = false,
+                ColorMode = ImportColorMode.Preserved, AutoCorrectAlmostVHLines = false
+            };
+            var id = doc.Import(importPath, options, view);
+            if (doc.GetElement(id) is not ImportInstance element || element.IsLinked || element.ViewSpecific)
+                throw new InvalidOperationException($"Revit no creó una importación embebida para {piece.Id}.");
+            if (element.Pinned) element.Pinned = false;
+            if (request.VerticalAxis != ObjVerticalAxis.Z)
+            {
+                var axis = request.VerticalAxis == ObjVerticalAxis.Y ? XYZ.BasisX : XYZ.BasisY;
+                var angle = request.VerticalAxis == ObjVerticalAxis.Y ? Math.PI / 2 : -Math.PI / 2;
+                ElementTransformUtils.RotateElement(doc, id, Line.CreateUnbound(XYZ.Zero, axis), angle);
+            }
+            var shift = pose.TranslationMm;
+            ElementTransformUtils.MoveElement(doc, id, Mm(new ObjPoint(shift.X, shift.Y, shift.Z)));
+            doc.Regenerate();
+            ValidateElement(element, pose.Transform(piece.Box), piece.Id, pose.GlobalBoxMm);
+            using (var entity = new Entity(schema))
+            {
+                entity.Set("ComponentId", piece.Id);
+                entity.Set("SourceSha256", manifest.SourceSha256);
+                entity.Set("PieceSha256", piece.Sha256);
+                element.SetEntity(entity);
+            }
+            var comments = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+            if (comments is { IsReadOnly: false, StorageType: StorageType.String })
+                comments.Set("Componente_" + number.ToString("000", System.Globalization.CultureInfo.InvariantCulture));
+            if (color is not null) ApplyColor(doc, element, piece.Id, color, templateMaterials, usedMaterials);
+        }
+        ObjFamilyImporter.SetParameters(doc, request, Size(pose.GlobalBoxMm));
+        ValidateSaved(doc, request, assembly, manifest);
+        if (transaction.Commit() != TransactionStatus.Committed)
+            throw new InvalidOperationException("Revit no confirmó el ensamblaje OBJ.");
+        ValidateSaved(doc, request, assembly, manifest);
+    }
+
+    internal static void ValidateSaved(Document doc, ObjImportRequest request, ObjAssemblyRequest assembly,
+        ObjExtractionManifest? knownManifest = null)
+    {
+        var manifest = knownManifest ?? ObjComponentExtractor.Verify(request.Path, assembly.ExtractionDirectory);
+        var pose = Pose(request, manifest.GlobalBox);
+        if (!doc.IsFamilyDocument || doc.OwnerFamily.FamilyCategory.Id != new ElementId(BuiltInCategory.OST_GenericModel))
+            throw new InvalidOperationException("El RFA por componentes no es una familia de Modelo genérico.");
+        var elements = new FilteredElementCollector(doc).OfClass(typeof(ImportInstance)).Cast<ImportInstance>().ToArray();
+        if (elements.Length != manifest.ComponentCount)
+            throw new InvalidOperationException("El número de componentes importados no coincide con el manifiesto.");
+        var schema = ComponentSchema();
+        var byId = new Dictionary<string, ImportInstance>(StringComparer.Ordinal);
+        foreach (var element in elements)
+        {
+            var entity = element.GetEntity(schema);
+            if (!entity.IsValid() || entity.Get<string>("SourceSha256") != manifest.SourceSha256)
+                throw new InvalidOperationException("La importación perdió su identidad de origen.");
+            string id = entity.Get<string>("ComponentId");
+            if (!byId.TryAdd(id, element)) throw new InvalidOperationException("Identidad de componente duplicada.");
+        }
+        foreach (var piece in manifest.Components)
+        {
+            if (!byId.TryGetValue(piece.Id, out var element) || element.IsLinked || element.ViewSpecific)
+                throw new InvalidOperationException($"Falta la importación embebida {piece.Id}.");
+            var entity = element.GetEntity(schema);
+            if (entity.Get<string>("PieceSha256") != piece.Sha256)
+                throw new InvalidOperationException($"Cambió la correspondencia de {piece.Id}.");
+            ValidateElement(element, pose.Transform(piece.Box), piece.Id, pose.GlobalBoxMm);
+            int number = int.Parse(piece.Id["component_".Length..], System.Globalization.CultureInfo.InvariantCulture);
+            var color = assembly.Colors.SingleOrDefault(c => c.Number == number);
+            if (color is not null) ValidateColor(doc, element, color, piece.Id);
+        }
+        var actual = Union(elements.Select(ObjFamilyImporter.Bounds));
+        AssertBox(actual, pose.GlobalBoxMm, "conjunto", pose.GlobalBoxMm);
+        var manager = doc.FamilyManager;
+        foreach (var (name, expected) in new[] { ("Ancho", Size(pose.GlobalBoxMm).X),
+            ("Profundidad", Size(pose.GlobalBoxMm).Y), ("Altura", Size(pose.GlobalBoxMm).Z) })
+        {
+            var parameter = manager.get_Parameter(name);
+            if (parameter is null || manager.CurrentType.AsDouble(parameter) is not { } actualValue ||
+                Math.Abs(actualValue - expected) > Tolerance(pose.GlobalBoxMm))
+                throw new InvalidOperationException($"La dimensión BIM {name} no coincide con el ensamblaje.");
+        }
+    }
+
+    private static ObjAssemblyTransform Pose(ObjImportRequest request, ObjBox box)
+    {
+        var unit = request.Unit switch
+        {
+            ObjUnit.Millimeters => UnitTypeId.Millimeters, ObjUnit.Centimeters => UnitTypeId.Centimeters,
+            ObjUnit.Meters => UnitTypeId.Meters, ObjUnit.Inches => UnitTypeId.Inches, _ => UnitTypeId.Feet
+        };
+        double feetPerUnit = UnitUtils.ConvertToInternalUnits(1, unit);
+        double mmPerUnit = UnitUtils.ConvertFromInternalUnits(feetPerUnit, UnitTypeId.Millimeters);
+        return ObjAssemblyTransform.Create(box, request.VerticalAxis, mmPerUnit, request.TargetHeightMm);
+    }
+
+    private static XYZ Mm(ObjPoint point) => new(
+        UnitUtils.ConvertToInternalUnits(point.X, UnitTypeId.Millimeters),
+        UnitUtils.ConvertToInternalUnits(point.Y, UnitTypeId.Millimeters),
+        UnitUtils.ConvertToInternalUnits(point.Z, UnitTypeId.Millimeters));
+    private static XYZ Size(ObjBox box) => Mm(new ObjPoint(box.Max.X - box.Min.X,
+        box.Max.Y - box.Min.Y, box.Max.Z - box.Min.Z));
+    private static double Tolerance(ObjBox global) => Math.Max(UnitUtils.ConvertToInternalUnits(0.1, UnitTypeId.Millimeters),
+        Size(global).GetLength() * 1e-6);
+    private static void ValidateElement(ImportInstance element, ObjBox expected, string id, ObjBox global)
+    {
+        ObjFamilyImporter.ValidateMeshPresent(element);
+        AssertBox(ObjFamilyImporter.Bounds(element), expected, id, global);
+    }
+    private static void AssertBox(BoundingBoxXYZ actual, ObjBox expected, string id, ObjBox global)
+    {
+        double tolerance = Tolerance(global);
+        if ((actual.Min - Mm(expected.Min)).GetLength() > tolerance ||
+            (actual.Max - Mm(expected.Max)).GetLength() > tolerance)
+            throw new InvalidOperationException($"{id}: posición, escala u orientación distintas de la transformación global.");
+    }
+    private static BoundingBoxXYZ Union(IEnumerable<BoundingBoxXYZ> boxes)
+    {
+        var array = boxes.ToArray();
+        return new BoundingBoxXYZ
+        {
+            Min = new XYZ(array.Min(b => b.Min.X), array.Min(b => b.Min.Y), array.Min(b => b.Min.Z)),
+            Max = new XYZ(array.Max(b => b.Max.X), array.Max(b => b.Max.Y), array.Max(b => b.Max.Z))
+        };
+    }
+
+    private static void ApplyColor(Document doc, ImportInstance element, string id, ComponentColor color,
+        IReadOnlySet<ElementId> templateMaterials, HashSet<ElementId> alreadyUsed)
+    {
+        var ids = ImportedMaterials.InspectElement(doc, element).Select(r => r.MaterialId).Distinct().ToArray();
+        if (ids.Length != 1 || doc.GetElement(ids[0]) is not Material material ||
+            templateMaterials.Contains(ids[0]) || !alreadyUsed.Add(ids[0]))
+            throw new InvalidOperationException($"{id}: Revit no expuso un material exclusivo y editable.");
+        string name = $"BFAI_{id}_{Guid.NewGuid():N}";
+        if (!Material.IsNameUnique(doc, name)) throw new InvalidOperationException($"{id}: nombre de material ocupado.");
+        material.Name = name;
+        material.UseRenderAppearanceForShading = false;
+        material.Color = new Color(color.Red, color.Green, color.Blue);
+        material.Transparency = 0;
+        ValidateColor(doc, element, color, id);
+    }
+    private static void ValidateColor(Document doc, ImportInstance element, ComponentColor color, string id)
+    {
+        var ids = ImportedMaterials.InspectElement(doc, element).Select(r => r.MaterialId).Distinct().ToArray();
+        if (ids.Length != 1 || doc.GetElement(ids[0]) is not Material material ||
+            !material.Name.StartsWith($"BFAI_{id}_", StringComparison.Ordinal) ||
+            material.Color.Red != color.Red || material.Color.Green != color.Green || material.Color.Blue != color.Blue ||
+            material.UseRenderAppearanceForShading || material.Transparency != 0)
+            throw new InvalidOperationException($"{id}: color gráfico independiente no persistió.");
+    }
+
+    private static Schema ComponentSchema()
+    {
+        var schema = Schema.Lookup(SchemaId);
+        if (schema is not null) return schema;
+        var builder = new SchemaBuilder(SchemaId);
+        builder.SetSchemaName("BFAI_ObjComponent_v1");
+        builder.SetReadAccessLevel(AccessLevel.Public);
+        builder.SetWriteAccessLevel(AccessLevel.Public);
+        builder.AddSimpleField("ComponentId", typeof(string));
+        builder.AddSimpleField("SourceSha256", typeof(string));
+        builder.AddSimpleField("PieceSha256", typeof(string));
+        return builder.Finish();
+    }
+}

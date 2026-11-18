@@ -65,6 +65,14 @@ internal static class ObjFamilyImporter
         ElementTransformUtils.MoveElement(doc, id, new XYZ(-(box.Min.X+box.Max.X)/2, -(box.Min.Y+box.Max.Y)/2, -box.Min.Z));
         doc.Regenerate();
         ValidateGeometry(element, expected);
+        SetParameters(doc, request, expected);
+        if (transaction.Commit() != TransactionStatus.Committed)
+            throw new InvalidOperationException("Revit rechazó la importación: " + failures.Error);
+        ValidateGeometry(doc.GetElement(id), expected);
+    }
+
+    internal static void SetParameters(Document doc, ObjImportRequest request, XYZ expected)
+    {
         var fm = doc.FamilyManager;
         if (fm.CurrentType is null) fm.NewType("Importado");
         void Text(string name, string value)
@@ -83,9 +91,6 @@ internal static class ObjFamilyImporter
             if (p.IsInstance || p.Definition.GetDataType() != SpecTypeId.Length) throw new InvalidOperationException("Parámetro incompatible: " + name);
             fm.Set(p, size);
         }
-        if (transaction.Commit() != TransactionStatus.Committed)
-            throw new InvalidOperationException("Revit rechazó la importación: " + failures.Error);
-        ValidateGeometry(doc.GetElement(id), expected);
     }
 
     internal static void ValidateSaved(Document doc, ObjImportRequest request)
@@ -108,7 +113,7 @@ internal static class ObjFamilyImporter
             if (fm.get_Parameter(name) is null) throw new InvalidOperationException("No persistió " + name);
     }
 
-    private static BoundingBoxXYZ Bounds(Element element)
+    internal static BoundingBoxXYZ Bounds(Element element)
         => element.get_BoundingBox(null) ?? throw new InvalidOperationException("El OBJ no produjo una caja geométrica.");
 
     private static void ValidateGeometry(Element element, XYZ expected)
@@ -118,6 +123,11 @@ internal static class ObjFamilyImporter
         if ((box.Max-box.Min-expected).GetLength() > tolerance || Math.Abs(box.Min.Z) > tolerance ||
             Math.Abs(box.Min.X+box.Max.X) > tolerance*2 || Math.Abs(box.Min.Y+box.Max.Y) > tolerance*2)
             throw new InvalidOperationException($"Dimensiones o posición inesperadas. Obtenido (mm): {UnitUtils.ConvertFromInternalUnits(box.Max.X-box.Min.X, UnitTypeId.Millimeters):F3} × {UnitUtils.ConvertFromInternalUnits(box.Max.Y-box.Min.Y, UnitTypeId.Millimeters):F3} × {UnitUtils.ConvertFromInternalUnits(box.Max.Z-box.Min.Z, UnitTypeId.Millimeters):F3}.");
+        ValidateMeshPresent(element);
+    }
+
+    internal static void ValidateMeshPresent(Element element)
+    {
         bool HasGeometry(GeometryElement? geometry) => geometry is not null && geometry.Any(g =>
             g is Mesh mesh && mesh.NumTriangles > 0 || g is Solid solid && solid.Faces.Size > 0 ||
             g is GeometryInstance instance && HasGeometry(instance.GetInstanceGeometry()));
