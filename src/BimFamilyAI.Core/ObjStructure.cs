@@ -12,6 +12,7 @@ public sealed record ObjStructureResult(int Vertices, int Faces, long Triangles,
     IReadOnlyList<ObjFaceDistribution> ByObject, IReadOnlyList<ObjFaceDistribution> ByGroup,
     IReadOnlyList<ObjFaceDistribution> ByMaterial, IReadOnlyList<ObjComponent> Components,
     int DuplicateCoordinateVertices, int? OverlappingComponentBoxPairs, IReadOnlyList<string> Caveats);
+internal sealed record ObjTopology(ObjStructureResult Structure, IReadOnlyList<int> FaceComponents);
 
 /// <summary>Read-only OBJ structure. Connectivity means shared position indices in faces, never spatial or semantic identity.</summary>
 public static class ObjStructure
@@ -27,7 +28,9 @@ public static class ObjStructure
         public long Triangles;
     }
 
-    public static ObjStructureResult Analyze(string path)
+    public static ObjStructureResult Analyze(string path) => AnalyzeWithFaces(path).Structure;
+
+    internal static ObjTopology AnalyzeWithFaces(string path)
     {
         // Keep the importer's existing validation and size/complexity limits authoritative.
         ObjInspection.Inspect(path);
@@ -120,8 +123,11 @@ public static class ObjStructure
             foreach (var group in face.Groups) builder.Groups.Add(group);
             builder.Materials.Add(face.Material);
         }
-        var components = builders.Values.OrderBy(b => b.Vertices.Min()).Select((b, number) =>
+        var ordered = builders.OrderBy(item => item.Value.Vertices.Min()).ToArray();
+        var rootToNumber = ordered.Select((item, index) => (item.Key, Number: index + 1)).ToDictionary(x => x.Key, x => x.Number);
+        var components = ordered.Select((item, number) =>
         {
+            var b = item.Value;
             var points = b.Vertices.Select(i => vertices[i]).ToArray();
             var min = new ObjPoint(points.Min(p => p.X), points.Min(p => p.Y), points.Min(p => p.Z));
             var max = new ObjPoint(points.Max(p => p.X), points.Max(p => p.Y), points.Max(p => p.Z));
@@ -157,11 +163,12 @@ public static class ObjStructure
         if (boxOverlaps > 0) caveats.Add("Hay cajas de componentes superpuestas; eso no demuestra intersección de superficies.");
         caveats.Add("mtllib y usemtl son referencias declaradas; no se verifica la existencia del MTL ni los índices vt/vn.");
         caveats.Add("La conectividad usa índices de posición; no prueba contacto espacial, ausencia de intersecciones ni identidad semántica.");
-        return new ObjStructureResult(vertices.Count, faces.Count, faces.Sum(f => (long)f.Triangles),
+        var result = new ObjStructureResult(vertices.Count, faces.Count, faces.Sum(f => (long)f.Triangles),
             objectDeclarations, groupDeclarations, libraries.Order(StringComparer.Ordinal).ToArray(),
             Distribution(faces.Select(f => (f.Object, f.Triangles))),
             Distribution(faces.SelectMany(f => f.Groups.Select(g => (g, f.Triangles)))),
             Distribution(faces.Select(f => (f.Material, f.Triangles))), components, duplicates, boxOverlaps, caveats);
+        return new ObjTopology(result, faces.Select(f => rootToNumber[Root(f.Indices[0])]).ToArray());
     }
 
     private static double Parse(string value) => double.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture);

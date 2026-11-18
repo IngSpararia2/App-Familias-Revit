@@ -1,6 +1,20 @@
 using BimFamilyAI.Core;
 using System.Text.Json;
 
+if (args.Length == 3 && args[0] == "--extract")
+{
+    try
+    {
+        var result = ObjComponentExtractor.Extract(args[1], args[2]);
+        Console.WriteLine($"Extracción validada: {result.Manifest.ComponentCount} componente(s) en {result.OutputDirectory}");
+        Console.WriteLine("Manifiesto: " + Path.Combine(result.OutputDirectory, "manifest.json"));
+        foreach (var warning in result.Manifest.Warnings) Console.WriteLine("Aviso: " + warning);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    { Console.Error.WriteLine("Extracción rechazada: " + ex.Message); Environment.ExitCode = 1; }
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--analyze")
 {
     Console.WriteLine(JsonSerializer.Serialize(ObjStructure.Analyze(args[1]), new JsonSerializerOptions { WriteIndented = true }));
@@ -39,6 +53,7 @@ try
     File.WriteAllText(negative, "v 0 0 0\nv 2 0 0\nv 0 3 4\nf -3 -2 -1");
     Check(ObjInspection.Inspect(negative) == new ObjBounds(2,3,4), "negative indices");
     passed += ObjStructureChecks.Run(fixtures, directory);
+    passed += ObjExtractionChecks.Run(fixtures, directory);
     Console.WriteLine($"{passed} checks passed");
 }
 finally { Directory.Delete(directory, true); }
