@@ -32,8 +32,12 @@ internal sealed class PhotoFamilyWindow : Window
     private readonly ListBox history=new() {Height=110};
     private readonly CheckBox editMaterials=new() {Content="Materiales y apariencia: elegir antes de guardar (sin generar IA)",Margin=new Thickness(0,8,0,4)};
     private readonly TextBlock componentInfo=new() {Text="La modalidad por componentes usa mallas desconectadas por índices, sin nombres semánticos.",TextWrapping=TextWrapping.Wrap};
+    private readonly TextBlock labelIdentity=new() {Text="Seleccione una importación en el editor de familias de Revit y pulse Consultar selección.",TextWrapping=TextWrapping.Wrap};
+    private readonly TextBox labelName=new();
+    private readonly ListBox existingLabels=new() {Height=118};
     private readonly List<Control> controls=[];
     private Button stop=null!, generate=null!, query=null!, resume=null!, createRfa=null!, openRfa=null!, reconcile=null!, retry=null!, objFolder=null!, rfaFolder=null!, analyzeComponents=null!, configureColors=null!;
+    private Button consultLabel=null!, listLabels=null!, saveLabel=null!, clearLabel=null!;
     private PhotoGenerationSession session=null!;
     private JsonTaskStore store=null!;
     private MeshySimulation? simulation;
@@ -41,6 +45,7 @@ internal sealed class PhotoFamilyWindow : Window
     private string? photoPath, lastRfa, localObjPath;
     private ObjStructureResult? componentReport;
     private IReadOnlyList<ComponentColor> componentColors=[];
+    private ComponentLabelItem? selectedLabel;
     private CancellationTokenSource? operationCancellation;
     private Task? running;
     private bool busy, closed, shutdown;
@@ -129,6 +134,22 @@ internal sealed class PhotoFamilyWindow : Window
         openRfa=AddButton(locations,"Abrir RFA en Revit",()=>Run(OpenRfaAsync,false));
         objFolder=AddButton(locations,"Abrir carpeta OBJ",()=>OpenFolder(AvailableObjPath));
         rfaFolder=AddButton(locations,"Abrir carpeta RFA",()=>OpenFolder(lastRfa));
+
+        var labeling=Section(content,"Identificación manual · RFA por componentes activo");
+        Label(labeling,"Abra un RFA por componentes, seleccione visualmente una importación en Revit y vuelva aquí para consultar su identidad. Los nombres son manuales; no separan caras ni modifican la geometría. Los OBJ completos no tienen componentes etiquetables.");
+        var labelActions=new WrapPanel();labeling.Children.Add(labelActions);
+        consultLabel=AddButton(labelActions,"Consultar selección",()=>Run(token=>LabelActionAsync(new(ComponentLabelAction.Selected),token),false));
+        listLabels=AddButton(labelActions,"Consultar etiquetas existentes",()=>Run(token=>LabelActionAsync(new(ComponentLabelAction.List),token),false));
+        labeling.Children.Add(labelIdentity);
+        Label(labeling,"Caras OBJ: no disponibles de forma fiable en un RFA ya guardado; el identificador técnico permanece estable.");
+        Field(labeling,"Nombre descriptivo manual (1–120 caracteres)",labelName);
+        var editActions=new WrapPanel();labeling.Children.Add(editActions);
+        saveLabel=AddButton(editActions,"Asignar o cambiar nombre",()=>Run(token=>LabelActionAsync(
+            new(ComponentLabelAction.Set,selectedLabel?.ElementUniqueId,selectedLabel?.ComponentId,labelName.Text),token),false));
+        clearLabel=AddButton(editActions,"Quitar etiqueta manual",()=>Run(token=>LabelActionAsync(
+            new(ComponentLabelAction.Clear,selectedLabel?.ElementUniqueId,selectedLabel?.ComponentId),token),false));
+        Label(labeling,"Etiquetas del RFA activo (seleccione la geometría en Revit para comprobar su correspondencia):");
+        labeling.Children.Add(existingLabels);
 
         height.TextChanged+=(_,_)=>UpdateControls();name.TextChanged+=(_,_)=>UpdateControls();polycount.TextChanged+=(_,_)=>UpdateControls();
         taskId.TextChanged+=(_,_)=>UpdateControls();
@@ -416,6 +437,30 @@ internal sealed class PhotoFamilyWindow : Window
     }
     private async Task OpenRfaAsync(CancellationToken token)
     {token.ThrowIfCancellationRequested();if(lastRfa is null)throw new ArgumentException("Cree un RFA primero.");var outcome=await bridge.Enqueue(new(null,lastRfa));SetStatus(outcome.Message);}
+    private async Task LabelActionAsync(ComponentLabelRequest request,CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var outcome=await bridge.Enqueue(new(null,null,LabelRequest:request));
+        if(outcome.Status!=Autodesk.Revit.UI.Result.Succeeded || outcome.Labels is null)
+        {
+            if(request.Action is ComponentLabelAction.Selected or ComponentLabelAction.List)
+            {selectedLabel=null;labelName.Text="";labelIdentity.Text="No se identificó ninguna pieza; consulte una importación válida del RFA activo.";UpdateControls();}
+            SetStatus(outcome.Message);return;
+        }
+        selectedLabel=outcome.Labels.Selected;
+        labelName.Text=selectedLabel?.Name ?? "";
+        labelIdentity.Text=selectedLabel is null
+            ? $"{outcome.Labels.Items.Count} componentes BIM Family AI encontrados. Seleccione una pieza en Revit para identificarla visualmente."
+            : $"Seleccionado: {selectedLabel.ComponentId} · "+(selectedLabel.Name is null?"sin etiqueta manual":$"nombre manual: {selectedLabel.Name}");
+        existingLabels.ItemsSource=outcome.Labels.Items.Select(i=>i.ComponentId+"  →  "+(i.Name ?? "(sin etiqueta)")).ToArray();
+        SetStatus(request.Action switch
+        {
+            ComponentLabelAction.Set=>"Etiqueta guardada en la familia activa. Use Guardar de Revit para conservarla en el archivo RFA.",
+            ComponentLabelAction.Clear=>"Etiqueta manual retirada de la familia activa. Use Guardar de Revit para conservar el cambio.",
+            _=>"Identidades consultadas en el RFA activo. Los nombres son asignados manualmente."
+        });
+        UpdateControls();
+    }
     private void OpenFolder(string? path)
     {
         try {if(path is null || !File.Exists(path))throw new IOException();Process.Start(new ProcessStartInfo(Path.GetDirectoryName(path)!) {UseShellExecute=true});}
@@ -439,6 +484,10 @@ internal sealed class PhotoFamilyWindow : Window
             (familyMode.SelectedIndex==0 || componentReport?.Components.Count!=1);
         analyzeComponents.IsEnabled=!busy && hasObj;
         configureColors.IsEnabled=!busy && familyMode.SelectedIndex==1 && componentReport?.Components.Count>=2;
+        consultLabel.IsEnabled=!busy;
+        listLabels.IsEnabled=!busy;
+        saveLabel.IsEnabled=!busy && selectedLabel is not null;
+        clearLabel.IsEnabled=!busy && selectedLabel is not null;
         editMaterials.IsEnabled=!busy && familyMode.SelectedIndex==0;
         editMaterials.Visibility=familyMode.SelectedIndex==0?Visibility.Visible:Visibility.Collapsed;
         openRfa.IsEnabled=!busy && lastRfa is not null && File.Exists(lastRfa);

@@ -5,7 +5,7 @@ using BimFamilyAI.Core;
 namespace BimFamilyAI.Revit;
 
 internal sealed record PhotoRevitRequest(ObjImportRequest? Import, string? OpenRfaPath, bool EditMaterials = false,
-    ObjAssemblyRequest? Assembly = null);
+    ObjAssemblyRequest? Assembly = null, ComponentLabelRequest? LabelRequest = null);
 
 /// <summary>One immutable request at a time. All Autodesk work stays in Execute.</summary>
 internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
@@ -29,7 +29,9 @@ internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
     {
         if (closing || disposed) throw new InvalidOperationException("La ventana se está cerrando.");
         if (pending is not null || IsExecuting) throw new InvalidOperationException("Ya hay una operación Revit pendiente.");
-        if ((request.Import is null)==(request.OpenRfaPath is null)) throw new ArgumentException("Solicitud Revit incompleta.");
+        if ((request.Import is not null ? 1 : 0) + (request.OpenRfaPath is not null ? 1 : 0) +
+            (request.LabelRequest is not null ? 1 : 0) != 1)
+            throw new ArgumentException("Solicitud Revit incompleta.");
         pending=request;
         completion=new(TaskCreationOptions.RunContinuationsAsynchronously);
         var task=completion.Task;
@@ -53,6 +55,8 @@ internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
         {
             if (request.Import is { } import)
                 result.TrySetResult(FamilyFileWorkflow.CreateFamily(application.Application,false,import,request.EditMaterials,request.Assembly));
+            else if (request.LabelRequest is { } labels)
+                result.TrySetResult(new(Result.Succeeded,null,"Componentes consultados en Revit.",ComponentLabels.Execute(application,labels)));
             else
             {
                 string path=request.OpenRfaPath!;

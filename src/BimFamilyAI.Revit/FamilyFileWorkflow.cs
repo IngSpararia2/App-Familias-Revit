@@ -178,5 +178,6 @@ internal static class FamilyFileWorkflow
     }
 }
 
-internal sealed record FamilyWorkflowOutcome(Result Status, string? OutputPath, string Message);
+internal sealed record FamilyWorkflowOutcome(Result Status, string? OutputPath, string Message,
+    ComponentLabelResponse? Labels = null);
 

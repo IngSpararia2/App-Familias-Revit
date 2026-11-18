@@ -7,6 +7,7 @@
  <Compile Include="../../src/BimFamilyAI.Revit/UniformObjMaterial.cs" Link="UniformObjMaterial.cs"/>
  <Compile Include="../../src/BimFamilyAI.Revit/ObjFamilyImporter.cs" Link="ObjFamilyImporter.cs"/>
  <Compile Include="../../src/BimFamilyAI.Revit/ObjAssemblyImporter.cs" Link="ObjAssemblyImporter.cs"/>
+ <Compile Include="../../src/BimFamilyAI.Revit/ComponentLabels.cs" Link="ComponentLabels.cs"/>
  <Compile Include="../../src/BimFamilyAI.Revit/FamilyFileWorkflow.cs" Link="FamilyFileWorkflow.cs"/>
  <Compile Include="../../src/BimFamilyAI.Revit/ImportedMaterialDialog.cs" Link="ImportedMaterialDialog.cs"/>
  <Compile Include="../../src/BimFamilyAI.Revit/ParametricBoxBuilder.cs" Link="ParametricBoxBuilder.cs"/>

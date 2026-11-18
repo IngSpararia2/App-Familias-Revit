@@ -7,11 +7,33 @@ namespace BimFamilyAI.Revit;
 
 internal sealed record ComponentColor(int Number, byte Red, byte Green, byte Blue);
 internal sealed record ObjAssemblyRequest(string ExtractionDirectory, IReadOnlyList<ComponentColor> Colors);
+internal sealed record ObjComponentIdentity(string ComponentId, string SourceSha256, string PieceSha256);
 
 /// <summary>Imports all extracted pieces in one family coordinate system, exclusively in Revit API context.</summary>
 internal static class ObjAssemblyImporter
 {
     private static readonly Guid SchemaId = new("45ca17db-d2e5-4c44-9981-2c824f842dd3");
+
+    // Read the immutable 5D-B2 identity without creating or changing its published schema.
+    internal static ObjComponentIdentity? TryReadIdentity(ImportInstance element)
+    {
+        var schema = Schema.Lookup(SchemaId);
+        if (schema is null) return null;
+        try
+        {
+            var entity = element.GetEntity(schema);
+            if (!entity.IsValid()) return null;
+            string id = entity.Get<string>("ComponentId");
+            string source = entity.Get<string>("SourceSha256");
+            string piece = entity.Get<string>("PieceSha256");
+            if (id is null || !id.StartsWith("component_", StringComparison.Ordinal) ||
+                !int.TryParse(id["component_".Length..], out int number) || number is < 1 or > 128 ||
+                source is null || source.Length != 64 || piece is null || piece.Length != 64 ||
+                !source.All(Uri.IsHexDigit) || !piece.All(Uri.IsHexDigit)) return null;
+            return new(id, source, piece);
+        }
+        catch (Exception) { return null; }
+    }
 
     internal static void Import(Document doc, ObjImportRequest request, ObjAssemblyRequest assembly,
         IReadOnlySet<ElementId> templateMaterials)
