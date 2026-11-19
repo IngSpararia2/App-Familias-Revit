@@ -6,13 +6,15 @@ using BimFamilyAI.Core;
 namespace BimFamilyAI.Revit;
 
 internal sealed record ComponentColor(int Number, byte Red, byte Green, byte Blue);
-internal sealed record ObjAssemblyRequest(string ExtractionDirectory, IReadOnlyList<ComponentColor> Colors);
+internal sealed record ObjAssemblyRequest(string ExtractionDirectory, IReadOnlyList<ComponentColor> Colors,
+    string? RegionDirectory = null);
 internal sealed record ObjComponentIdentity(string ComponentId, string SourceSha256, string PieceSha256);
 
 /// <summary>Imports all extracted pieces in one family coordinate system, exclusively in Revit API context.</summary>
 internal static class ObjAssemblyImporter
 {
     private static readonly Guid SchemaId = new("45ca17db-d2e5-4c44-9981-2c824f842dd3");
+    private static readonly Guid RegionSchemaId = new("4937a4e4-62fa-44f4-a766-b91ad462144a");
 
     // Read the immutable 5D-B2 identity without creating or changing its published schema.
     internal static ObjComponentIdentity? TryReadIdentity(ImportInstance element)
@@ -42,13 +44,18 @@ internal static class ObjAssemblyImporter
             throw new InvalidOperationException("La instalación de Revit no dispone del módulo OBJ.");
         ObjInspection.ValidateName(request.FamilyName);
         var manifest = ObjComponentExtractor.Verify(request.Path, assembly.ExtractionDirectory);
-        if (manifest.ComponentCount < 2)
+        var regionManifest = assembly.RegionDirectory is null ? null :
+            ObjComponentExtractor.VerifyRegions(request.Path, assembly.ExtractionDirectory, assembly.RegionDirectory);
+        if (manifest.ComponentCount < 2 && regionManifest is null)
             throw new InvalidOperationException("El OBJ tiene una sola componente; use OBJ completo.");
         if (manifest.ComponentCount > 128)
             throw new InvalidOperationException("Más de 128 componentes: revise el modelo antes de importar en Revit.");
         if (assembly.Colors.Select(c => c.Number).Distinct().Count() != assembly.Colors.Count ||
             assembly.Colors.Any(c => c.Number < 1 || c.Number > manifest.ComponentCount))
             throw new InvalidOperationException("Asignación de color a componentes inválida.");
+        if (regionManifest is not null && assembly.Colors.Any(c => regionManifest.Components.Any(p =>
+            p.ComponentId == $"component_{c.Number:000}")))
+            throw new InvalidOperationException("Una pieza con regiones no admite además un color uniforme.");
         var pose = Pose(request, manifest.GlobalBox);
         using var transaction = new Transaction(doc, "Importar componentes OBJ");
         if (transaction.Start() != TransactionStatus.Started)
@@ -56,14 +63,17 @@ internal static class ObjAssemblyImporter
         var view = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
             .First(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan);
         var schema = ComponentSchema();
+        var regionSchema = regionManifest is null ? null : RegionSchema();
         var usedMaterials = new HashSet<ElementId>();
         foreach (var piece in manifest.Components)
         {
             int number = int.Parse(piece.Id["component_".Length..], System.Globalization.CultureInfo.InvariantCulture);
             var color = assembly.Colors.SingleOrDefault(c => c.Number == number);
+            var regionPiece = regionManifest?.Components.SingleOrDefault(p => p.ComponentId == piece.Id);
             string path = Path.Combine(assembly.ExtractionDirectory, piece.FileName);
             using var prepared = color is null ? null : UniformObjMaterial.Prepare(path, color.Red, color.Green, color.Blue);
-            string importPath = prepared?.Path ?? path;
+            string importPath = regionPiece is null ? prepared?.Path ?? path :
+                Path.Combine(assembly.RegionDirectory!, regionPiece.FileName);
             using var options = new OBJImportOptions
             {
                 Unit = ImportUnit.Millimeter,
@@ -96,18 +106,32 @@ internal static class ObjAssemblyImporter
             if (comments is { IsReadOnly: false, StorageType: StorageType.String })
                 comments.Set("Componente_" + number.ToString("000", System.Globalization.CultureInfo.InvariantCulture));
             if (color is not null) ApplyColor(doc, element, piece.Id, color, templateMaterials, usedMaterials);
+            if (regionPiece is not null)
+            {
+                ApplyRegionColors(doc, element, piece.Id, regionPiece, templateMaterials, usedMaterials);
+                using var regionEntity = new Entity(regionSchema!);
+                regionEntity.Set("ComponentId", piece.Id);
+                regionEntity.Set("SourceSha256", manifest.SourceSha256);
+                regionEntity.Set("OriginalPieceSha256", piece.Sha256);
+                regionEntity.Set("PlanSha256", regionManifest!.PlanSha256);
+                regionEntity.Set("DerivedObjSha256", regionPiece.DerivedSha256);
+                regionEntity.Set("FormatVersion", 1);
+                element.SetEntity(regionEntity);
+            }
         }
         ObjFamilyImporter.SetParameters(doc, request, Size(pose.GlobalBoxMm));
-        ValidateSaved(doc, request, assembly, manifest);
+        ValidateSaved(doc, request, assembly, manifest, regionManifest);
         if (transaction.Commit() != TransactionStatus.Committed)
             throw new InvalidOperationException("Revit no confirmó el ensamblaje OBJ.");
-        ValidateSaved(doc, request, assembly, manifest);
+        ValidateSaved(doc, request, assembly, manifest, regionManifest);
     }
 
     internal static void ValidateSaved(Document doc, ObjImportRequest request, ObjAssemblyRequest assembly,
-        ObjExtractionManifest? knownManifest = null)
+        ObjExtractionManifest? knownManifest = null, ObjRegionManifest? knownRegions = null)
     {
         var manifest = knownManifest ?? ObjComponentExtractor.Verify(request.Path, assembly.ExtractionDirectory);
+        var regionManifest = knownRegions ?? (assembly.RegionDirectory is null ? null :
+            ObjComponentExtractor.VerifyRegions(request.Path, assembly.ExtractionDirectory, assembly.RegionDirectory));
         var pose = Pose(request, manifest.GlobalBox);
         if (!doc.IsFamilyDocument || doc.OwnerFamily.FamilyCategory.Id != new ElementId(BuiltInCategory.OST_GenericModel))
             throw new InvalidOperationException("El RFA por componentes no es una familia de Modelo genérico.");
@@ -135,6 +159,19 @@ internal static class ObjAssemblyImporter
             int number = int.Parse(piece.Id["component_".Length..], System.Globalization.CultureInfo.InvariantCulture);
             var color = assembly.Colors.SingleOrDefault(c => c.Number == number);
             if (color is not null) ValidateColor(doc, element, color, piece.Id);
+            var regionPiece = regionManifest?.Components.SingleOrDefault(p => p.ComponentId == piece.Id);
+            if (regionPiece is not null)
+            {
+                ValidateRegionColors(doc, element, piece.Id, regionPiece);
+                var regionEntity = element.GetEntity(RegionSchema());
+                if (!regionEntity.IsValid() || regionEntity.Get<int>("FormatVersion") != 1 ||
+                    regionEntity.Get<string>("ComponentId") != piece.Id ||
+                    regionEntity.Get<string>("SourceSha256") != manifest.SourceSha256 ||
+                    regionEntity.Get<string>("OriginalPieceSha256") != piece.Sha256 ||
+                    regionEntity.Get<string>("PlanSha256") != regionManifest!.PlanSha256 ||
+                    regionEntity.Get<string>("DerivedObjSha256") != regionPiece.DerivedSha256)
+                    throw new InvalidOperationException($"{piece.Id}: se perdió la procedencia de regiones.");
+            }
         }
         var actual = Union(elements.Select(ObjFamilyImporter.Bounds));
         AssertBox(actual, pose.GlobalBoxMm, "conjunto", pose.GlobalBoxMm);
@@ -206,6 +243,58 @@ internal static class ObjAssemblyImporter
         material.Transparency = 0;
         ValidateColor(doc, element, color, id);
     }
+    private static void ApplyRegionColors(Document doc, ImportInstance element, string id,
+        ObjRegionDerivedPiece piece, IReadOnlySet<ElementId> templateMaterials,
+        HashSet<ElementId> alreadyUsed)
+    {
+        var ids = ImportedMaterials.InspectElement(doc, element).Select(r => r.MaterialId).Distinct().ToArray();
+        if (ids.Length < piece.Materials.Count || ids.Any(materialId =>
+            templateMaterials.Contains(materialId) || !alreadyUsed.Add(materialId) ||
+            doc.GetElement(materialId) is not Material))
+            throw new InvalidOperationException($"{id}: Revit no expuso materiales exclusivos para las regiones.");
+        var materials = ids.Select(materialId => (Material)doc.GetElement(materialId)).ToArray();
+        var assigned = new HashSet<ElementId>();
+        foreach (var expected in piece.Materials)
+        {
+            var matches = materials.Where(m => m.Name == expected.MaterialName).ToArray();
+            if (matches.Length != 1 || !assigned.Add(matches[0].Id))
+                throw new InvalidOperationException($"{id}: Revit no conservó la referencia de material {expected.RegionId}.");
+        }
+        foreach (var material in materials)
+        {
+            var expected = piece.Materials.SingleOrDefault(m => material.Name == m.MaterialName);
+            string isolated = $"BFAI_{id}_{(expected?.MaterialName ?? "Original")}_{Guid.NewGuid():N}";
+            if (!Material.IsNameUnique(doc, isolated))
+                throw new InvalidOperationException($"{id}: no se pudo aislar un material de región.");
+            material.Name = isolated;
+            if (expected is null) continue;
+            material.UseRenderAppearanceForShading = false;
+            material.Color = new Color(expected.Color.Red, expected.Color.Green, expected.Color.Blue);
+            material.Transparency = 0;
+        }
+        doc.Regenerate();
+        ValidateRegionColors(doc, element, id, piece);
+    }
+    private static void ValidateRegionColors(Document doc, ImportInstance element, string id,
+        ObjRegionDerivedPiece piece)
+    {
+        var ids = ImportedMaterials.InspectElement(doc, element).Select(r => r.MaterialId).Distinct().ToArray();
+        if (ids.Length < piece.Materials.Count || ids.Any(materialId =>
+            doc.GetElement(materialId) is not Material m ||
+            !m.Name.StartsWith($"BFAI_{id}_", StringComparison.Ordinal)))
+            throw new InvalidOperationException($"{id}: faltan referencias gráficas propias de las regiones.");
+        foreach (var expected in piece.Materials)
+        {
+            string prefix = $"BFAI_{id}_{expected.MaterialName}_";
+            var matching = ids.Select(materialId => (Material)doc.GetElement(materialId))
+                .Where(m => m.Name.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+            if (matching.Length != 1 || matching[0].Color.Red != expected.Color.Red ||
+                matching[0].Color.Green != expected.Color.Green ||
+                matching[0].Color.Blue != expected.Color.Blue || matching[0].Transparency != 0 ||
+                matching[0].UseRenderAppearanceForShading)
+                throw new InvalidOperationException($"{id}: RGB de la región {expected.RegionId} no persistió.");
+        }
+    }
     private static void ValidateColor(Document doc, ImportInstance element, ComponentColor color, string id)
     {
         var ids = ImportedMaterials.InspectElement(doc, element).Select(r => r.MaterialId).Distinct().ToArray();
@@ -227,6 +316,23 @@ internal static class ObjAssemblyImporter
         builder.AddSimpleField("ComponentId", typeof(string));
         builder.AddSimpleField("SourceSha256", typeof(string));
         builder.AddSimpleField("PieceSha256", typeof(string));
+        return builder.Finish();
+    }
+
+    private static Schema RegionSchema()
+    {
+        var schema = Schema.Lookup(RegionSchemaId);
+        if (schema is not null) return schema;
+        var builder = new SchemaBuilder(RegionSchemaId);
+        builder.SetSchemaName("BFAI_FaceRegions_v1");
+        builder.SetReadAccessLevel(AccessLevel.Public);
+        builder.SetWriteAccessLevel(AccessLevel.Public);
+        builder.AddSimpleField("ComponentId", typeof(string));
+        builder.AddSimpleField("SourceSha256", typeof(string));
+        builder.AddSimpleField("OriginalPieceSha256", typeof(string));
+        builder.AddSimpleField("PlanSha256", typeof(string));
+        builder.AddSimpleField("DerivedObjSha256", typeof(string));
+        builder.AddSimpleField("FormatVersion", typeof(int));
         return builder.Finish();
     }
 }

@@ -15,6 +15,21 @@ if (args.Length == 3 && args[0] == "--extract")
     return;
 }
 
+if (args.Length == 5 && args[0] == "--regions")
+{
+    try
+    {
+        var plan = JsonSerializer.Deserialize<ObjRegionPlan>(File.ReadAllText(args[3]))
+            ?? throw new IOException("Plan de regiones vacío.");
+        var result = ObjComponentExtractor.DeriveRegions(args[1], args[2], plan, args[4]);
+        Console.WriteLine($"Derivación validada: {result.Manifest.Components.Count} componente(s) con regiones en {result.OutputDirectory}");
+        Console.WriteLine("Manifiesto: " + Path.Combine(result.OutputDirectory, "manifest.json"));
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+    { Console.Error.WriteLine("Regiones rechazadas: " + ex.Message); Environment.ExitCode = 1; }
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--analyze")
 {
     Console.WriteLine(JsonSerializer.Serialize(ObjStructure.Analyze(args[1]), new JsonSerializerOptions { WriteIndented = true }));
@@ -55,6 +70,7 @@ try
     passed += ObjStructureChecks.Run(fixtures, directory);
     passed += ObjExtractionChecks.Run(fixtures, directory);
     passed += ObjAssemblyChecks.Run(fixtures, directory);
+    passed += ObjRegionChecks.Run(fixtures, directory);
     Console.WriteLine($"{passed} checks passed");
 }
 finally { Directory.Delete(directory, true); }

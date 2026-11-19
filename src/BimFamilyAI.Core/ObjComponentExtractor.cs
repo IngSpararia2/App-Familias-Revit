@@ -15,7 +15,7 @@ public sealed record ObjExtractionManifest(int FormatVersion, string SourceSha25
 public sealed record ObjExtractionResult(string OutputDirectory, ObjExtractionManifest Manifest);
 
 /// <summary>Copies topological components into independent OBJ files without transforming source coordinates.</summary>
-public static class ObjComponentExtractor
+public static partial class ObjComponentExtractor
 {
     private sealed record Corner(int Position, int? Texture, int? Normal, int SlashCount);
     private sealed record Face(int Number, Corner[] Corners, string? Object, string? Group,
