@@ -1,4 +1,5 @@
 using System.IO;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -24,7 +25,7 @@ public sealed class FaceRegionChecks : IExternalApplication
         while (folder is not null && !File.Exists(Path.Combine(folder.FullName, "BIMFamilyAI.sln"))) folder = folder.Parent;
         if (folder is null) throw new DirectoryNotFoundException("No se encontró la solución.");
         string root = folder.FullName;
-        string output = Path.Combine(root, "artifacts", "stage5d-c2a-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        string output = Path.Combine(root, "artifacts", "stage5d-c2b-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(output);
         int passed = 0;
         var log = new List<object>();
@@ -63,11 +64,27 @@ public sealed class FaceRegionChecks : IExternalApplication
             var cubeSha = Sha(cube);
             Check(extracted.Manifest.ComponentCount == 1 && extracted.Manifest.Components[0].Faces == 12,
                 "controlled cube has one connected import and twelve faces");
-            ObjRegionPlan CubePlan(ObjRegionColor top, ObjRegionColor rest) => new(1, cubeSha,
-                [new("component_001", [new("top", "Dos caras superiores elegidas en fixture", [3, 4], top)], rest)]);
+            var preview = ObjComponentExtractor.ReadRegionPreview(cube, pieces, ObjVerticalAxis.Z);
+            var selected = new HashSet<int>();
+            foreach (var origin in new[] { new Vector3(.25f, -.25f, 3), new Vector3(-.25f, .25f, 3) })
+            {
+                var hit = preview.Pick(origin, -Vector3.UnitZ, new HashSet<string>())
+                    ?? throw new Exception("No se pudo seleccionar la tapa en la vista previa.");
+                ObjRegionEdits.Select(selected, hit.OriginalFace, true);
+            }
+            Check(selected.SetEquals([3, 4]), "C2B preview rays select the two original top faces");
+            ObjRegionPlan CubePlan(ObjRegionColor top, ObjRegionColor rest)
+            {
+                var edits = new ObjRegionEdits(cubeSha);
+                edits.Put("component_001", null, "Tapa", top, selected);
+                edits.Put("component_001", null, "Cuerpo", rest, Enumerable.Range(1, 12).Except(selected));
+                return edits.Snapshot();
+            }
             string firstRegions = Path.Combine(output, "cube-regions-blue-gray");
             string secondRegions = Path.Combine(output, "cube-regions-red-green");
-            var firstPlan = CubePlan(new(0, 40, 255), new(90, 90, 90));
+            string planPath = Path.Combine(output, "editor-cube.json");
+            ObjComponentExtractor.SaveNewRegionPlan(planPath, CubePlan(new(0, 40, 255), new(90, 90, 90)));
+            var firstPlan = ObjComponentExtractor.ReadRegionPlan(planPath, cube, pieces);
             var secondPlan = CubePlan(new(240, 20, 20), new(0, 180, 40));
             var firstDerivation = ObjComponentExtractor.DeriveRegions(cube, pieces, firstPlan, firstRegions);
             ObjComponentExtractor.DeriveRegions(cube, pieces, secondPlan, secondRegions);
@@ -77,7 +94,11 @@ public sealed class FaceRegionChecks : IExternalApplication
             var requestA = new ObjImportRequest(cube, ObjUnit.Millimeters, ObjVerticalAxis.Z, 500,
                 "Stage5D_C2A_BlueGray", "Two face materials in one import");
             var requestB = requestA with { FamilyName = "Stage5D_C2A_RedGreen" };
-            var assemblyA = new ObjAssemblyRequest(pieces, [], firstRegions);
+            var cubeIdentity = new ObjComponentIdentity("component_001", cubeSha, extracted.Manifest.Components[0].Sha256);
+            var assemblyA = new ObjAssemblyRequest(pieces, [], firstRegions, new Dictionary<ObjComponentIdentity, string>
+            {
+                [cubeIdentity] = "Etiqueta manual de prueba"
+            });
             var assemblyB = new ObjAssemblyRequest(pieces, [], secondRegions);
             var resultA = FamilyFileWorkflow.CreateFamily(ui.Application, false, requestA, false, assemblyA);
             Check(resultA.Status == Result.Succeeded && File.Exists(resultA.OutputPath),
@@ -95,8 +116,8 @@ public sealed class FaceRegionChecks : IExternalApplication
                 identity.PieceSha256 == extracted.Manifest.Components[0].Sha256,
                 "original 5D-B2 identity and geometric hash preserved");
             var labels = ComponentLabels.ReadAll(doc);
-            Check(labels.Count == 1 && labels[0].ComponentId == "component_001",
-                "5D-C1 manual labeling can address the region-colored import");
+            Check(labels.Count == 1 && labels[0].ComponentId == "component_001" && labels[0].Name == "Etiqueta manual de prueba",
+                "5D-C1 manual label persists on the region-colored import");
             Check(Colors(doc, imports[0]).SetEquals(["0,40,255", "90,90,90"]),
                 "two independent RGB colors inside one ImportInstance");
             string geometryA = MeshSignature(doc);

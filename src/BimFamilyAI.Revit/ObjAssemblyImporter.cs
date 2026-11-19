@@ -7,7 +7,7 @@ namespace BimFamilyAI.Revit;
 
 internal sealed record ComponentColor(int Number, byte Red, byte Green, byte Blue);
 internal sealed record ObjAssemblyRequest(string ExtractionDirectory, IReadOnlyList<ComponentColor> Colors,
-    string? RegionDirectory = null);
+    string? RegionDirectory = null, IReadOnlyDictionary<ObjComponentIdentity, string>? Labels = null);
 internal sealed record ObjComponentIdentity(string ComponentId, string SourceSha256, string PieceSha256);
 
 /// <summary>Imports all extracted pieces in one family coordinate system, exclusively in Revit API context.</summary>
@@ -105,6 +105,9 @@ internal static class ObjAssemblyImporter
             var comments = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
             if (comments is { IsReadOnly: false, StorageType: StorageType.String })
                 comments.Set("Componente_" + number.ToString("000", System.Globalization.CultureInfo.InvariantCulture));
+            var identity = new ObjComponentIdentity(piece.Id, manifest.SourceSha256, piece.Sha256);
+            if (assembly.Labels?.TryGetValue(identity, out var label) == true)
+                ComponentLabels.WriteName(element, piece.Id, label);
             if (color is not null) ApplyColor(doc, element, piece.Id, color, templateMaterials, usedMaterials);
             if (regionPiece is not null)
             {
@@ -155,6 +158,9 @@ internal static class ObjAssemblyImporter
             var entity = element.GetEntity(schema);
             if (entity.Get<string>("PieceSha256") != piece.Sha256)
                 throw new InvalidOperationException($"Cambió la correspondencia de {piece.Id}.");
+            var identity = new ObjComponentIdentity(piece.Id, manifest.SourceSha256, piece.Sha256);
+            if (assembly.Labels?.TryGetValue(identity, out var label) == true && ComponentLabels.ReadName(element, piece.Id) != label)
+                throw new InvalidOperationException($"No se conservó la etiqueta de {piece.Id}.");
             ValidateElement(element, pose.Transform(piece.Box), piece.Id, pose.GlobalBoxMm);
             int number = int.Parse(piece.Id["component_".Length..], System.Globalization.CultureInfo.InvariantCulture);
             var color = assembly.Colors.SingleOrDefault(c => c.Number == number);

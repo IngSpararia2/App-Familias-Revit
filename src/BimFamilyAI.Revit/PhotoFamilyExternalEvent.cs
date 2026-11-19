@@ -1,5 +1,6 @@
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Events;
+using Autodesk.Revit.DB;
 using BimFamilyAI.Core;
 
 namespace BimFamilyAI.Revit;
@@ -54,7 +55,22 @@ internal sealed class PhotoFamilyExternalEvent : IExternalEventHandler
         try
         {
             if (request.Import is { } import)
-                result.TrySetResult(FamilyFileWorkflow.CreateFamily(application.Application,false,import,request.EditMaterials,request.Assembly));
+            {
+                var assembly = request.Assembly;
+                if (assembly is { RegionDirectory: not null } && application.ActiveUIDocument?.Document is { IsFamilyDocument: true } active)
+                {
+                    var verified = ObjComponentExtractor.Verify(import.Path, assembly.ExtractionDirectory);
+                    var identities = verified.Components.Select(piece => new ObjComponentIdentity(
+                        piece.Id, verified.SourceSha256, piece.Sha256)).ToHashSet();
+                    var labels = new Dictionary<ObjComponentIdentity, string>();
+                    foreach (var element in new FilteredElementCollector(active).OfClass(typeof(ImportInstance)).Cast<ImportInstance>())
+                        if (ObjAssemblyImporter.TryReadIdentity(element) is { } identity && identities.Contains(identity) &&
+                            ComponentLabels.ReadName(element, identity.ComponentId) is { } name)
+                            labels.Add(identity, name);
+                    assembly = assembly with { Labels = labels };
+                }
+                result.TrySetResult(FamilyFileWorkflow.CreateFamily(application.Application,false,import,request.EditMaterials,assembly));
+            }
             else if (request.LabelRequest is { } labels)
                 result.TrySetResult(new(Result.Succeeded,null,"Componentes consultados en Revit.",ComponentLabels.Execute(application,labels)));
             else

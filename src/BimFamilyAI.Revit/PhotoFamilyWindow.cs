@@ -20,7 +20,7 @@ internal sealed class PhotoFamilyWindow : Window
     private readonly ComboBox mode=new() {ItemsSource=new[] {"Prueba (simulado, 0 créditos)","Real (Meshy API, puede consumir créditos)"},SelectedIndex=0};
     private readonly ComboBox scenario=new() {ItemsSource=new[] {"Normal","Seguimiento lento","HTTP 401","HTTP 402","HTTP 429","Timeout de creación","Tarea fallida","URL vencida","OBJ inválido","Creación incierta"},SelectedIndex=0};
     private readonly ComboBox axis=new() {ItemsSource=new[] {"Z","Y","X"},SelectedIndex=0};
-    private readonly ComboBox familyMode=new() {ItemsSource=new[] {"OBJ completo · una importación", "Componentes separados · importaciones independientes"},SelectedIndex=0};
+    private readonly ComboBox familyMode=new() {ItemsSource=new[] {"OBJ completo · una importación", "Componentes separados · importaciones independientes", "Regiones de caras · materiales por selección"},SelectedIndex=0};
     private readonly TextBox polycount=new() {Text="4000",Width=90,HorizontalAlignment=HorizontalAlignment.Left};
     private readonly TextBox name=new() {Text="SIM_Familia_Foto"}, description=new() {AcceptsReturn=true,Height=43}, height=new();
     private readonly TextBox taskId=new(), objPath=new() {IsReadOnly=true,TextWrapping=TextWrapping.Wrap,Height=42}, rfaPath=new() {IsReadOnly=true,TextWrapping=TextWrapping.Wrap,Height=42};
@@ -45,6 +45,9 @@ internal sealed class PhotoFamilyWindow : Window
     private string? photoPath, lastRfa, localObjPath;
     private ObjStructureResult? componentReport;
     private IReadOnlyList<ComponentColor> componentColors=[];
+    private ObjRegionPlan? regionPlan;
+    private FaceRegionEditor? regionEditor;
+    private Button editRegions=null!;
     private ComponentLabelItem? selectedLabel;
     private CancellationTokenSource? operationCancellation;
     private Task? running;
@@ -122,6 +125,7 @@ internal sealed class PhotoFamilyWindow : Window
         analyzeComponents=AddButton(family,"Analizar componentes del OBJ",()=>Run(AnalyzeComponentsAsync,false));
         family.Children.Add(componentInfo);
         configureColors=AddButton(family,"Configurar colores por componente",ConfigureComponentColors);
+        editRegions=AddButton(family,"Abrir editor visual de regiones",()=>Run(EditRegionsAsync,false));
         Label(family,"Cada componente es una malla desconectada, no una pieza reconocida como asiento o pata. El modo por componentes usa una transformación global y no crea otra tarea IA.");
         family.Children.Add(editMaterials);controls.Add(editMaterials);
         Label(family,"Al marcar, podrá conservar la apariencia original, aplicar RGB uniforme, copiar un color gráfico o editar materiales independientes si el OBJ los expone. Afecta al nuevo RFA en Sombreado; Realista puede mostrar otra apariencia. No separa asiento, respaldo y patas.");
@@ -345,14 +349,14 @@ internal sealed class PhotoFamilyWindow : Window
     private void ShowResult(GeneratedObjResult generated)
     {
         if(closed)return;
-        localObjPath=null;componentReport=null;componentColors=[];
+        localObjPath=null;componentReport=null;componentColors=[];regionPlan=null;
         componentInfo.Text="Pulse Analizar componentes para conocer las piezas topológicas del OBJ.";
         result=generated;taskId.Text=generated.TaskId;objPath.Text=generated.LocalPath;progressBar.Value=100;
         SetStatus(IsSimulated?"SIMULACIÓN terminada. OBJ fijo de prueba conservado. Confirme altura para crear el RFA; no fue generado por IA.":"OBJ validado y conservado. Confirme una altura real y el eje; puede crear o repetir el RFA sin otra generación.");
     }
     private void ClearArtifacts(bool resetHeight)
     {
-        result=null;localObjPath=null;componentReport=null;componentColors=[];lastRfa=null;objPath.Text="";rfaPath.Text="";
+        result=null;localObjPath=null;componentReport=null;componentColors=[];regionPlan=null;lastRfa=null;objPath.Text="";rfaPath.Text="";
         componentInfo.Text="Seleccione un OBJ y pulse Analizar componentes.";
         if(resetHeight)height.Text="";
         if(!closed)UpdateControls();
@@ -365,7 +369,7 @@ internal sealed class PhotoFamilyWindow : Window
         string path=picker.FileName;
         await Task.Run(()=>ObjInspection.Inspect(path),token);
         token.ThrowIfCancellationRequested();
-        result=null;localObjPath=path;lastRfa=null;componentReport=null;componentColors=[];
+        result=null;localObjPath=path;lastRfa=null;componentReport=null;componentColors=[];regionPlan=null;
         taskId.Text="";objPath.Text=path;rfaPath.Text="";
         componentInfo.Text="Pulse Analizar componentes para conocer las piezas topológicas del OBJ.";
         SetStatus("OBJ local validado. No se consultó ni generó una tarea Meshy.");
@@ -379,7 +383,7 @@ internal sealed class PhotoFamilyWindow : Window
         token.ThrowIfCancellationRequested();
         componentReport=report;componentColors=[];
         componentInfo.Text=report.Components.Count==1
-            ? "Una sola componente topológica. Use OBJ completo; no existe una separación independiente segura."
+            ? "Una sola componente topológica. Puede importarla completa o asignar materiales por regiones."
             : $"{report.Components.Count} componentes topológicos detectados. Son mallas desconectadas por índices; no se identifican automáticamente asiento, respaldo o patas.";
         SetStatus(componentInfo.Text);
         UpdateControls();
@@ -417,23 +421,68 @@ internal sealed class PhotoFamilyWindow : Window
             ? new ObjImportRequest(source,ObjUnit.Millimeters,vertical,mm,familyName,"OBJ local; dimensiones informativas. "+details,true)
             : PhotoFamilyRequest.Create(generated!,mm,vertical,familyName,details,simulated),token);
         ObjAssemblyRequest? assembly=null;
-        if(familyMode.SelectedIndex==1)
+        if(familyMode.SelectedIndex!=0)
         {
             var report=componentReport ?? await Task.Run(()=>ObjStructure.Analyze(source),token);
             componentReport=report;
-            if(report.Components.Count<2)throw new ArgumentException("El OBJ tiene una sola componente; elija OBJ completo.");
+            var plan=familyMode.SelectedIndex==2
+                ? regionPlan ?? throw new ArgumentException("Confirme un plan en el editor visual primero.")
+                : null;
+            if(report.Components.Count<2 && plan is null)throw new ArgumentException("El OBJ tiene una sola componente; elija OBJ completo.");
             if(report.Components.Count>128)throw new ArgumentException("Más de 128 componentes: revise el OBJ antes de importar.");
             string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"BIM Family AI","Components");
             Directory.CreateDirectory(root);
             string folder=Path.Combine(root,"extraction-"+Guid.NewGuid().ToString("N"));
             SetStatus("Extrayendo y validando piezas locales; no se llamará a Meshy.");
-            var extraction=await Task.Run(()=>ObjComponentExtractor.Extract(source,folder),token);
-            assembly=new ObjAssemblyRequest(extraction.OutputDirectory,componentColors.ToArray());
+            var colors=componentColors.Where(c=>plan is null || !plan.Components.Any(p=>p.ComponentId==$"component_{c.Number:000}")).ToArray();
+            assembly=await Task.Run(()=>
+            {
+                var extraction=ObjComponentExtractor.Extract(source,folder);
+                token.ThrowIfCancellationRequested();
+                string? regions=plan is null ? null : ObjComponentExtractor.DeriveRegions(source,
+                    extraction.OutputDirectory,plan,folder+"-regions").OutputDirectory;
+                return new ObjAssemblyRequest(extraction.OutputDirectory,colors,regions);
+            },token);
         }
         token.ThrowIfCancellationRequested();SetStatus("Solicitud encolada para Revit. Termine cualquier comando activo. La importación nativa puede ocupar temporalmente la interfaz.");
         var outcome=await bridge.Enqueue(new(request,null,assembly is null && editMaterials.IsChecked==true,assembly));
         if(outcome.OutputPath is not null) {lastRfa=outcome.OutputPath;rfaPath.Text=lastRfa;}
         SetStatus(outcome.Status==Autodesk.Revit.UI.Result.Succeeded ? "RFA creado y verificado tras reabrir. "+(assembly is null?"OBJ completo.":$"{componentReport!.Components.Count} componentes ensamblados.")+" "+outcome.Message : "No se creó el RFA: "+outcome.Message+" El OBJ sigue disponible; corrija los datos y repita solo Crear familia RFA.");
+    }
+    private async Task EditRegionsAsync(CancellationToken token)
+    {
+        string source=AvailableObjPath ?? throw new ArgumentException("Seleccione o recupere un OBJ primero.");
+        var vertical=(ObjVerticalAxis)axis.SelectedIndex;
+        var initial=regionPlan;
+        SetStatus("Preparando la vista previa de las caras originales…");
+        var root=Path.Combine(Path.GetTempPath(),"BFAI-region-preview-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            var prepared=await Task.Run(()=>
+            {
+                var extracted=ObjComponentExtractor.Extract(source,root);
+                token.ThrowIfCancellationRequested();
+                var plan=initial is null ? null : ObjComponentExtractor.ValidateRegionPlan(source,root,initial);
+                return (extracted, ObjComponentExtractor.ReadRegionPreview(source,root,vertical), plan);
+            },token);
+            token.ThrowIfCancellationRequested();
+            regionEditor=new FaceRegionEditor(source,prepared.extracted,prepared.Item2,prepared.plan) {Owner=this};
+            if(regionEditor.ShowDialog()==true)
+            {
+                var confirmed=regionEditor.AcceptedPlan;
+                regionPlan=confirmed?.Components.Count>0 ? confirmed : null;
+                familyMode.SelectedIndex=regionPlan is null ? 0 : 2;
+                SetStatus(regionPlan is null ? "Sin regiones activas." :
+                    $"{regionPlan.Components.Sum(c=>c.Regions.Count)} regiones listas para crear el RFA.");
+            }
+            else SetStatus("Edición cancelada. Se conserva el último plan confirmado.");
+        }
+        finally
+        {
+            if(regionEditor is not null) await regionEditor.PendingFileOperation;
+            regionEditor=null;
+            if(Directory.Exists(root)) Directory.Delete(root,true);
+        }
     }
     private async Task OpenRfaAsync(CancellationToken token)
     {token.ThrowIfCancellationRequested();if(lastRfa is null)throw new ArgumentException("Cree un RFA primero.");var outcome=await bridge.Enqueue(new(null,lastRfa));SetStatus(outcome.Message);}
@@ -481,8 +530,9 @@ internal sealed class PhotoFamilyWindow : Window
         resume.IsEnabled=!busy && validId;
         bool hasObj=AvailableObjPath is { } path && File.Exists(path);
         createRfa.IsEnabled=!busy && hasObj && validHeight && validName &&
-            (familyMode.SelectedIndex==0 || componentReport?.Components.Count!=1);
+            (familyMode.SelectedIndex switch {0=>true,1=>componentReport?.Components.Count!=1,_=>regionPlan is not null});
         analyzeComponents.IsEnabled=!busy && hasObj;
+        editRegions.IsEnabled=!busy && hasObj;
         configureColors.IsEnabled=!busy && familyMode.SelectedIndex==1 && componentReport?.Components.Count>=2;
         consultLabel.IsEnabled=!busy;
         listLabels.IsEnabled=!busy;
@@ -516,5 +566,5 @@ internal sealed class PhotoFamilyWindow : Window
         if(running is not null)try {await running;}catch(Exception) { }
         session.Dispose();preview.Source=null;
     }
-    internal void CloseForShutdown() {shutdown=true;confirmation?.Close();Close();}
+    internal void CloseForShutdown() {shutdown=true;regionEditor?.Close();confirmation?.Close();Close();}
 }

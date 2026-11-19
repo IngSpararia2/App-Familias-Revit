@@ -52,12 +52,7 @@ internal static class ComponentLabels
             }
             else
             {
-                var schema = LabelSchema();
-                using var entity = new Entity(schema);
-                entity.Set("ComponentId", identity.ComponentId);
-                entity.Set("Name", name);
-                entity.Set("Version", Version);
-                element.SetEntity(entity);
+                WriteName(element, identity.ComponentId, name);
             }
             if (transaction.Commit() != TransactionStatus.Committed)
                 throw new InvalidOperationException("Revit no confirmó el cambio de etiqueta.");
@@ -97,6 +92,15 @@ internal static class ComponentLabels
         if (entity.Get<int>("Version") != Version || entity.Get<string>("ComponentId") != componentId)
             throw new InvalidOperationException("La etiqueta no corresponde a la identidad técnica de esta pieza.");
         return ValidateName(entity.Get<string>("Name"));
+    }
+
+    internal static void WriteName(ImportInstance element, string componentId, string name)
+    {
+        using var entity = new Entity(LabelSchema());
+        entity.Set("ComponentId", componentId);
+        entity.Set("Name", ValidateName(name));
+        entity.Set("Version", Version);
+        element.SetEntity(entity);
     }
 
     internal static string ValidateName(string? value)

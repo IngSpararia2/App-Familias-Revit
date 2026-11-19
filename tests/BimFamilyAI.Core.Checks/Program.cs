@@ -71,6 +71,7 @@ try
     passed += ObjExtractionChecks.Run(fixtures, directory);
     passed += ObjAssemblyChecks.Run(fixtures, directory);
     passed += ObjRegionChecks.Run(fixtures, directory);
+    passed += ObjRegionEditorChecks.Run(directory);
     Console.WriteLine($"{passed} checks passed");
 }
 finally { Directory.Delete(directory, true); }

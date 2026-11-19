@@ -1,4 +1,4 @@
-# BIM Family AI — Etapa 5D-C2A
+# BIM Family AI — Etapa 5D-C2B
 
 Cuarto comando: **Complementos → Herramientas externas → BIM Family AI — Crear familia desde fotografía**. Abre una ventana no modal con fotografía/vista previa, Meshy T2, historial, seguimiento, recuperación y creación de RFA mediante ExternalEvent.
 
@@ -121,5 +121,9 @@ Con un OBJ ya recuperado, marque **Materiales y apariencia** antes de Crear RFA.
 **Etapa 5D-C1:** abra una familia por componentes en el editor de familias y el cuarto comando. En la sección «Identificación manual», seleccione visualmente una importación en Revit y pulse **Consultar selección**. La ventana muestra su `component_###` y la etiqueta actual; puede asignar, cambiar o quitar el nombre manual y consultar todas las etiquetas. Guarde el RFA con Revit. Funciona también con familias 5D-B2 anteriores y no requiere otra generación Meshy. La etiqueta vive en un esquema Extensible Storage complementario; no cambia el ID, la geometría ni el RGB. La identificación es manual y por componente topológico, no por regiones de caras. Véase [validación 5D-C1](docs/stage5d-c1-validation.md).
 
 **Etapa 5D-C2A:** `ObjComponentExtractor.DeriveRegions` admite planes JSON de caras originales por componente y color RGB. Produce copias OBJ/MTL derivadas y un manifiesto nuevo con hashes del origen, de la pieza 5D-B1, del plan y de la derivación. Para una prueba local: `dotnet run --project tests/BimFamilyAI.Core.Checks -c Release -- --regions <origen.obj> <extraccion-5D-B1> <plan.json> <carpeta-nueva>`. El destino no debe existir. `ObjAssemblyImporter` puede recibir esa carpeta de regiones y conserva la identidad 5D-B2 y las etiquetas 5D-C1; la ruta de interfaz de usuario para editar caras y colores queda para 5D-C2B. La asignación no separa físicamente la malla ni identifica automáticamente un cojín. Véase [validación 5D-C2A](docs/stage5d-c2a-validation.md).
+
+**Etapa 5D-C2B.** En Preparación BIM, seleccione o recupere un OBJ, elija el eje original y abra **Abrir editor visual de regiones**. Gire con el botón derecho y acerque con la rueda. Seleccione una cara con clic y agregue o retire otras con Ctrl + clic. **Crecer** extiende la selección por aristas según el ángulo indicado. Aplique nombre, RGB y caras a cada región, guarde un plan JSON si desea retomarlo y pulse **Usar regiones**. Confirme altura y nombre en la ventana principal y cree el RFA en la modalidad **Regiones de caras**. Disponible también con una sola componente. [Validación 5D-C2B](docs/stage5d-c2b-validation.md).
+
+La etapa futura **5F — Optimización automática de polígonos según la fotografía** sigue pendiente.
 
 Referencias oficiales: https://help.autodesk.com/cloudhelp/2027/ENU/Revit-API/files/Revit_API_Developers_Guide/Introduction/Getting_Started/Using_the_Autodesk_Revit_API/Revit_API_Revit_API_Developers_Guide_Introduction_Getting_Started_Using_the_Autodesk_Revit_API_Registration_of_add_ins_html.html
