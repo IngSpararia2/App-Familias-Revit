@@ -26,3 +26,11 @@ En Computer Use se ejecutó el cuarto comando, se abrió el cubo local y se sele
 ## Límites
 
 La selección es manual. Una región es una asignación por caras y permanece dentro de su importación Revit. La vista de materiales es gráfica. Después de la prueba del cubo se ajustaron la iluminación, las normales de vista previa y el gesto de arrastre. Esa revisión compiló y se instaló, y se volvió a abrir el flujo de Revit. La visualización de la silla en el editor, el giro y el zoom de la revisión final quedaron pendientes al cerrar la sesión de validación. La silla sí pasó por Core y por la generación API con una selección técnica. La selección visual del cojín y la carga en RVT del RFA exacto creado por la interfaz quedan pendientes. La etapa futura **5F — Optimización automática de polígonos según la fotografía** sigue pendiente.
+
+## Validación multióbjeto del 23 de noviembre de 2026
+
+Se partió de `main`, HEAD `32e3e12a5356f047dab3d23726c775ace6049270`, alineado con `origin/main` y con el árbol limpio. Se encontraron siete OBJ en el almacén Meshy Real, cinco de la sesión del 23/11 y dos anteriores. Las cinco descargas recientes estaban validadas y sus archivos coincidieron con los SHA256 del historial. Se trabajó con copias, sin modificar el historial ni los OBJ originales. [Matriz, diagnósticos y evidencias](stage5d-c2b-multimodel.md)
+
+La validación Core cubrió los siete casos. La suite Release/x64 pasó 165 comprobaciones de Core y 187 de Meshy con transporte simulado. La compilación Release/x64 terminó con cero errores y dos advertencias MSB3277 de Autodesk.
+
+Revit 2027.2 generó y reabrió los siete RFA por API. Computer Use confirmó la selección gráfica en las seis mallas Meshy y generó dos RFA desde la interfaz normal. El RVT de prueba reabrió con las nueve familias, incluidas las copias exactas de esos dos RFA. Se verificó la transferencia 5D-C1 al repetir la generación de la silla desde su familia activa. [Resultados y alcance de aceptación](stage5d-c2b-multimodel.md)

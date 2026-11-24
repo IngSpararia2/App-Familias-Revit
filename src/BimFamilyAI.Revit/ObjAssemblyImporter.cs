@@ -13,6 +13,7 @@ internal sealed record ObjComponentIdentity(string ComponentId, string SourceSha
 /// <summary>Imports all extracted pieces in one family coordinate system, exclusively in Revit API context.</summary>
 internal static class ObjAssemblyImporter
 {
+    internal const int MaxAssemblyComponents = 128;
     private static readonly Guid SchemaId = new("45ca17db-d2e5-4c44-9981-2c824f842dd3");
     private static readonly Guid RegionSchemaId = new("4937a4e4-62fa-44f4-a766-b91ad462144a");
 
@@ -29,7 +30,8 @@ internal static class ObjAssemblyImporter
             string source = entity.Get<string>("SourceSha256");
             string piece = entity.Get<string>("PieceSha256");
             if (id is null || !id.StartsWith("component_", StringComparison.Ordinal) ||
-                !int.TryParse(id["component_".Length..], out int number) || number is < 1 or > 128 ||
+                !int.TryParse(id["component_".Length..], out int number) ||
+                number is < 1 or > ObjComponentExtractor.MaxRegionComponents ||
                 source is null || source.Length != 64 || piece is null || piece.Length != 64 ||
                 !source.All(Uri.IsHexDigit) || !piece.All(Uri.IsHexDigit)) return null;
             return new(id, source, piece);
@@ -48,8 +50,9 @@ internal static class ObjAssemblyImporter
             ObjComponentExtractor.VerifyRegions(request.Path, assembly.ExtractionDirectory, assembly.RegionDirectory);
         if (manifest.ComponentCount < 2 && regionManifest is null)
             throw new InvalidOperationException("El OBJ tiene una sola componente; use OBJ completo.");
-        if (manifest.ComponentCount > 128)
-            throw new InvalidOperationException("Más de 128 componentes: revise el modelo antes de importar en Revit.");
+        int limit = regionManifest is null ? MaxAssemblyComponents : ObjComponentExtractor.MaxRegionComponents;
+        if (manifest.ComponentCount > limit)
+            throw new InvalidOperationException($"Más de {limit} componentes: revise el modelo antes de importar en Revit.");
         if (assembly.Colors.Select(c => c.Number).Distinct().Count() != assembly.Colors.Count ||
             assembly.Colors.Any(c => c.Number < 1 || c.Number > manifest.ComponentCount))
             throw new InvalidOperationException("Asignación de color a componentes inválida.");

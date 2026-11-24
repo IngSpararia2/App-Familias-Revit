@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -33,7 +34,10 @@ internal sealed class FaceRegionEditor : Window
     private double yaw, pitch;
     private Point? drag, dragStart;
     private bool leftDrag;
-    private bool syncing, working, closed, draft;
+    private bool syncing, working, closed;
+    private ObjFaceRegion? appliedRegion;
+    private string appliedFallback = "";
+    private static readonly ObjRegionColor DefaultRegionColor = new(0, 80, 220);
     internal Task PendingFileOperation { get; private set; } = Task.CompletedTask;
     internal ObjRegionPlan? AcceptedPlan { get; private set; }
     private sealed record RegionItem(ObjFaceRegion Region)
@@ -42,6 +46,9 @@ internal sealed class FaceRegionEditor : Window
     }
     private string Active => (string)components.SelectedItem;
     private string? Editing => (regions.SelectedItem as RegionItem)?.Region.RegionId;
+    private bool RegionChanged => regionName.Text != (appliedRegion?.Name ?? appliedRegion?.RegionId ?? "") ||
+        rgb.Text != Format(appliedRegion?.Color ?? DefaultRegionColor) ||
+        !selection.SetEquals(appliedRegion?.OriginalFaceNumbers ?? []);
 
     internal FaceRegionEditor(string source, ObjExtractionResult extracted, ObjRegionPreview preview, ObjRegionPlan? initial)
     {
@@ -91,7 +98,7 @@ internal sealed class FaceRegionEditor : Window
         void EndDrag(object sender, MouseButtonEventArgs e)
         {
             if (drag is null || leftDrag != (e.ChangedButton == MouseButton.Left)) return;
-            bool pick = leftDrag && dragStart is not null;
+            bool pick = leftDrag && dragStart is { } start && (e.GetPosition(surface) - start).Length < 4;
             surface.ReleaseMouseCapture();
             if (pick) SelectFace(e.GetPosition(viewport));
         }
@@ -105,8 +112,13 @@ internal sealed class FaceRegionEditor : Window
 
         var panel = new StackPanel { Margin = new Thickness(13) };
         var scroll = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Grid.SetColumn(scroll, 1);
-        layout.Children.Add(scroll);
+        var sidebar = new DockPanel();
+        feedback.Margin = new Thickness(13, 4, 13, 8);
+        DockPanel.SetDock(feedback, Dock.Bottom);
+        sidebar.Children.Add(feedback);
+        sidebar.Children.Add(scroll);
+        Grid.SetColumn(sidebar, 1);
+        layout.Children.Add(sidebar);
         Label("Clic selecciona · Ctrl + clic agrega o retira · arrastre gira · rueda acerca");
         Add("Reencuadrar", ResetCamera);
         Field("Componente activa", components);
@@ -123,19 +135,20 @@ internal sealed class FaceRegionEditor : Window
         Field("RGB de respaldo para caras sin material (opcional)", fallback);
         Add("Aplicar respaldo", () =>
         {
-            edits.SetFallback(Active, string.IsNullOrWhiteSpace(fallback.Text) ? null : ParseColor(fallback.Text));
+            var color = string.IsNullOrWhiteSpace(fallback.Text) ? null : ParseColor(fallback.Text);
+            if (color is not null && !HasFacesWithoutMaterial())
+                throw new ArgumentException("Todas las caras de la componente tienen material de origen.");
+            edits.SetFallback(Active, color);
+            fallback.Text = appliedFallback = Format(edits.Get(Active).FallbackColor);
             Refresh();
         });
+        Add("Descartar cambios pendientes", () => ReloadRegions(Editing));
         Row(("Guardar plan…", () => PendingFileOperation = Persist(false)),
             ("Cargar plan…", () => PendingFileOperation = Persist(true)));
         Row(("Usar regiones", () => PendingFileOperation = Accept()), ("Cancelar", Close));
-        panel.Children.Add(feedback);
         components.ItemsSource = extracted.Manifest.Components.Select(p => p.Id).ToArray();
-        components.SelectionChanged += (_, _) => { if (!syncing) ReloadRegions(null); };
-        regions.SelectionChanged += (_, _) => { if (!syncing) LoadDraft(); };
-        regionName.TextChanged += (_, _) => { if (!syncing) draft = true; };
-        rgb.TextChanged += (_, _) => { if (!syncing) draft = true; };
-        fallback.TextChanged += (_, _) => { if (!syncing) draft = true; };
+        components.SelectionChanged += (_, e) => ChangeContext(components, e, () => ReloadRegions(null));
+        regions.SelectionChanged += (_, e) => ChangeContext(regions, e, LoadDraft);
         components.SelectedIndex = 0;
         Closed += (_, _) => closed = true;
         ResetCamera();
@@ -201,7 +214,6 @@ internal sealed class FaceRegionEditor : Window
         if (selection.SetEquals(next)) return;
         undo.Push(selection);
         selection = next;
-        draft = true;
         Refresh();
     }
     private void Undo()
@@ -225,47 +237,69 @@ internal sealed class FaceRegionEditor : Window
         var items = component.Regions.Select(region => new RegionItem(region)).ToArray();
         regions.ItemsSource = items;
         regions.SelectedItem = items.FirstOrDefault(item => item.Region.RegionId == id);
-        fallback.Text = Format(component.FallbackColor);
+        fallback.Text = appliedFallback = Format(component.FallbackColor);
         syncing = false;
         LoadDraft();
     }
     private void LoadDraft()
     {
         syncing = true;
-        var region = (regions.SelectedItem as RegionItem)?.Region;
-        regionName.Text = region?.Name ?? region?.RegionId ?? "";
-        rgb.Text = Format(region?.Color ?? new(0, 80, 220));
-        selection = region?.OriginalFaceNumbers.ToHashSet() ?? [];
+        appliedRegion = (regions.SelectedItem as RegionItem)?.Region;
+        regionName.Text = appliedRegion?.Name ?? appliedRegion?.RegionId ?? "";
+        rgb.Text = Format(appliedRegion?.Color ?? DefaultRegionColor);
+        selection = appliedRegion?.OriginalFaceNumbers.ToHashSet() ?? [];
         undo.Clear();
-        draft = false;
         syncing = false;
         Refresh();
     }
+
+    private bool CanLeaveDraft()
+    {
+        if (!RegionChanged && fallback.Text == appliedFallback)
+        {
+            feedback.Text = "";
+            return true;
+        }
+        feedback.Text = "Hay cambios pendientes. Aplíquelos o pulse «Descartar cambios pendientes».";
+        return false;
+    }
+
+    private void ChangeContext(Selector selector, SelectionChangedEventArgs e, Action change)
+    {
+        if (syncing) return;
+        if (CanLeaveDraft()) change();
+        else
+        {
+            syncing = true;
+            selector.SelectedItem = e.RemovedItems.Count == 0 ? null : e.RemovedItems[0];
+            syncing = false;
+        }
+    }
+
     private void NewRegion()
     {
-        syncing = true;
-        regions.SelectedIndex = -1;
-        regionName.Clear();
-        syncing = false;
-        draft = selection.Count > 0;
-        Refresh();
+        if (Editing is not null && CanLeaveDraft()) ReloadRegions(null);
     }
     private void PutRegion()
     {
         var color = ParseColor(rgb.Text);
         var back = string.IsNullOrWhiteSpace(fallback.Text) ? null : ParseColor(fallback.Text);
         edits.Put(Active, Editing, regionName.Text, color, selection);
-        edits.SetFallback(Active, back);
+        if (fallback.Text != appliedFallback) edits.SetFallback(Active, back);
         var saved = edits.Get(Active).Regions.Last();
         ReloadRegions(saved.RegionId);
         feedback.Text = $"Región aplicada · {saved.OriginalFaceNumbers.Count} caras.";
     }
     private void DeleteRegion()
     {
+        if (!CanLeaveDraft()) return;
         if (Editing is not { } id) throw new ArgumentException("Seleccione una región para eliminar.");
         edits.Delete(Active, id);
+        if (edits.Get(Active) is { Regions.Count: 0, FallbackColor: not null } && !HasFacesWithoutMaterial())
+            edits.SetFallback(Active, null);
         ReloadRegions(null);
     }
+    private bool HasFacesWithoutMaterial() => preview.Triangles.Any(t => t.ComponentId == Active && !t.HasOriginalMaterial);
     private static ObjRegionColor ParseColor(string value)
     {
         var parts = value.Split(',');
@@ -278,13 +312,14 @@ internal sealed class FaceRegionEditor : Window
     private void Refresh()
     {
         selectionInfo.Text = $"{selection.Count} caras seleccionadas · {hidden.Count} componentes ocultas";
+        bool highlight = !selection.SetEquals(appliedRegion?.OriginalFaceNumbers ?? []);
         var snapshot = edits.Snapshot();
         var colors = snapshot.Components.SelectMany(c => c.Regions)
             .SelectMany(r => r.OriginalFaceNumbers.Select(f => (f, r.Color))).ToDictionary(x => x.f, x => x.Color);
         var styles = snapshot.Components.ToDictionary(c => c.ComponentId);
         models.Children.Clear();
         foreach (var group in preview.Triangles.Where(t => !hidden.Contains(t.ComponentId)).GroupBy(t =>
-            t.ComponentId == Active && selection.Contains(t.OriginalFace) && draft ? new ObjRegionColor(255, 190, 50) :
+            t.ComponentId == Active && selection.Contains(t.OriginalFace) && highlight ? new ObjRegionColor(255, 190, 50) :
             colors.GetValueOrDefault(t.OriginalFace) ??
             (t.HasOriginalMaterial ? t.OriginalColor : styles.GetValueOrDefault(t.ComponentId)?.FallbackColor) ??
             (t.ComponentId == Active ? new(160, 177, 194) : new(110, 125, 143))))
@@ -314,6 +349,7 @@ internal sealed class FaceRegionEditor : Window
 
     private async Task Persist(bool load)
     {
+        if (!CanLeaveDraft()) return;
         string? file;
         if (load)
         {
@@ -346,6 +382,7 @@ internal sealed class FaceRegionEditor : Window
     }
     private async Task Accept()
     {
+        if (!CanLeaveDraft()) return;
         await ValidateAsync(async snapshot =>
         {
             if (snapshot.Components.Count > 0)

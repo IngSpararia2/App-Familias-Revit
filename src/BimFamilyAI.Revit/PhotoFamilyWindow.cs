@@ -429,7 +429,8 @@ internal sealed class PhotoFamilyWindow : Window
                 ? regionPlan ?? throw new ArgumentException("Confirme un plan en el editor visual primero.")
                 : null;
             if(report.Components.Count<2 && plan is null)throw new ArgumentException("El OBJ tiene una sola componente; elija OBJ completo.");
-            if(report.Components.Count>128)throw new ArgumentException("Más de 128 componentes: revise el OBJ antes de importar.");
+            int limit=plan is null ? ObjAssemblyImporter.MaxAssemblyComponents : ObjComponentExtractor.MaxRegionComponents;
+            if(report.Components.Count>limit)throw new ArgumentException($"Más de {limit} componentes: revise el OBJ antes de importar.");
             string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"BIM Family AI","Components");
             Directory.CreateDirectory(root);
             string folder=Path.Combine(root,"extraction-"+Guid.NewGuid().ToString("N"));
@@ -473,7 +474,7 @@ internal sealed class PhotoFamilyWindow : Window
                 regionPlan=confirmed?.Components.Count>0 ? confirmed : null;
                 familyMode.SelectedIndex=regionPlan is null ? 0 : 2;
                 SetStatus(regionPlan is null ? "Sin regiones activas." :
-                    $"{regionPlan.Components.Sum(c=>c.Regions.Count)} regiones listas para crear el RFA.");
+                    $"{regionPlan.Components.Sum(c=>c.Regions.Count)} regiones y {regionPlan.Components.Count} componentes con ajustes listos para crear el RFA.");
             }
             else SetStatus("Edición cancelada. Se conserva el último plan confirmado.");
         }

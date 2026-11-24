@@ -24,6 +24,7 @@ public sealed record ObjRegionDerivationResult(string OutputDirectory, ObjRegion
 
 public static partial class ObjComponentExtractor
 {
+    public const int MaxRegionComponents = 256;
     private static readonly JsonSerializerOptions RegionJson = new() { WriteIndented = true };
 
     /// <summary>Publishes material-only derivatives of verified B1 pieces. Face numbers always refer to the original OBJ.</summary>
@@ -160,7 +161,7 @@ public static partial class ObjComponentExtractor
         string extractionDirectory)
     {
         if (plan is null || plan.FormatVersion != 1 || plan.SourceSha256 != manifest.SourceSha256 ||
-            plan.Components is null || plan.Components.Count is < 1 or > 128)
+            plan.Components is null || plan.Components.Count is < 1 or > MaxRegionComponents)
             throw new IOException("Plan de regiones inválido o perteneciente a otro OBJ.");
         var known = manifest.Components.ToDictionary(p => p.Id, StringComparer.Ordinal);
         var ordered = new List<ObjComponentRegionPlan>();
@@ -169,7 +170,7 @@ public static partial class ObjComponentExtractor
         {
             if (component is null || !known.TryGetValue(component.ComponentId, out var piece) ||
                 !seen.Add(component.ComponentId) || component.Regions is null ||
-                component.Regions.Count is < 1 or > 256)
+                component.Regions.Count > 256)
                 throw new IOException("Componente de regiones inexistente, duplicada o vacía.");
             var validFaces = piece.OriginalFaceNumbers.ToHashSet();
             var claimed = new HashSet<int>();
@@ -192,6 +193,8 @@ public static partial class ObjComponentExtractor
                 regions.Add(region with { OriginalFaceNumbers = region.OriginalFaceNumbers.Order().ToArray() });
             }
             var original = Parse(Path.Combine(extractionDirectory, piece.FileName));
+            if (regions.Count == 0 && (component.FallbackColor is null || original.Faces.All(face => face.Material is not null)))
+                throw new IOException($"{component.ComponentId}: no hay caras a las que aplicar el respaldo.");
             for (int i = 0; i < piece.Faces; i++)
                 if (!claimed.Contains(piece.OriginalFaceNumbers[i]) && original.Faces[i].Material is null &&
                     component.FallbackColor is null)

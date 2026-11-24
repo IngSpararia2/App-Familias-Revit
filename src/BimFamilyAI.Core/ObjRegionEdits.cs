@@ -3,8 +3,10 @@ namespace BimFamilyAI.Core;
 public sealed class ObjRegionEdits(string sourceSha256)
 {
     private readonly Dictionary<string, ObjComponentRegionPlan> components = new(StringComparer.Ordinal);
+    private readonly HashSet<string> explicitFallbacks = new(StringComparer.Ordinal);
     public ObjRegionPlan Snapshot() => new(1, sourceSha256, components.Values
-        .Where(part => part.Regions.Count > 0).OrderBy(part => part.ComponentId, StringComparer.Ordinal).ToArray());
+        .Where(part => part.Regions.Count > 0 || part.FallbackColor is not null)
+        .OrderBy(part => part.ComponentId, StringComparer.Ordinal).ToArray());
     public ObjComponentRegionPlan Get(string component) => components.GetValueOrDefault(component)
         ?? new(component, [], new(150, 150, 150));
 
@@ -12,12 +14,20 @@ public sealed class ObjRegionEdits(string sourceSha256)
     {
         if (validated.SourceSha256 != sourceSha256) throw new ArgumentException("El plan pertenece a otro OBJ.");
         components.Clear();
-        foreach (var part in validated.Components) components.Add(part.ComponentId, part);
+        explicitFallbacks.Clear();
+        foreach (var part in validated.Components)
+        {
+            components.Add(part.ComponentId, part);
+            if (part.FallbackColor is not null) explicitFallbacks.Add(part.ComponentId);
+        }
     }
 
     public void SetFallback(string component, ObjRegionColor? color)
     {
-        components[component] = Get(component) with { FallbackColor = color };
+        var part = Get(component);
+        if (color is null) explicitFallbacks.Remove(component);
+        else explicitFallbacks.Add(component);
+        components[component] = part with { FallbackColor = color };
     }
 
     public void Put(string component, string? id, string name, ObjRegionColor color, IEnumerable<int> faces)
@@ -39,7 +49,9 @@ public sealed class ObjRegionEdits(string sourceSha256)
     public void Delete(string component, string id)
     {
         var part = Get(component);
-        components[component] = part with { Regions = part.Regions.Where(region => region.RegionId != id).ToArray() };
+        var remaining = part.Regions.Where(region => region.RegionId != id).ToArray();
+        if (remaining.Length == 0 && !explicitFallbacks.Contains(component)) components.Remove(component);
+        else components[component] = part with { Regions = remaining };
     }
 
     public static void Select(HashSet<int> selection, int face, bool toggle)

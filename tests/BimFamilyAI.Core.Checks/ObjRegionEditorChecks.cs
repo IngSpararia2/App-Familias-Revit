@@ -86,6 +86,22 @@ internal static class ObjRegionEditorChecks
         Check(edits.Get("component_001").Regions.Single().Name == "Estructura" && File.ReadAllText(source) == geometry &&
             ObjComponentExtractor.ReadRegionPlan(saved, source, extracted.OutputDirectory).Components[0].Regions.Count == 2,
             "discarded edits leave source and saved plan unchanged");
+        var fallbackOnly = new ObjRegionEdits(extracted.Manifest.SourceSha256);
+        fallbackOnly.SetFallback("component_002", green);
+        string fallbackFile = Path.Combine(directory, "editor-fallback.json");
+        ObjComponentExtractor.SaveNewRegionPlan(fallbackFile,
+            ObjComponentExtractor.ValidateRegionPlan(source, extracted.OutputDirectory, fallbackOnly.Snapshot()));
+        var fallbackPlan = ObjComponentExtractor.ReadRegionPlan(fallbackFile, source, extracted.OutputDirectory);
+        var fallbackPiece = ObjComponentExtractor.DeriveRegions(source, extracted.OutputDirectory, fallbackPlan,
+            Path.Combine(directory, "editor-fallback-derived")).Manifest.Components.Single();
+        Check(fallbackPiece.ComponentId == "component_002" && fallbackPiece.Materials.Single().IsFallback &&
+            fallbackPiece.Materials.Single().Color == green, "fallback alone persists and derives exactly the chosen RGB");
+        fallbackOnly.Put("component_001", null, "Temporal", blue, [1]);
+        fallbackOnly.Delete("component_001", fallbackOnly.Get("component_001").Regions.Single().RegionId);
+        Check(fallbackOnly.Snapshot().Components.Single().ComponentId == "component_002",
+            "deleting the only region does not activate the implicit default fallback");
+        fallbackOnly.SetFallback("component_002", null);
+        Check(fallbackOnly.Snapshot().Components.Count == 0, "clearing an explicit fallback removes the fallback-only edit");
         string other = Path.Combine(directory, "editor-other.obj");
         File.WriteAllText(other, geometry + "\n# other");
         var otherExtraction = ObjComponentExtractor.Extract(other, Path.Combine(directory, "editor-other-pieces"));
